@@ -11,23 +11,28 @@
     "preview": "electron-vite preview",
     "build:win": "electron-vite build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.pipeline.json",
     "db:init": "tsx db/init.ts",
     "db:seed": "tsx db/seed.ts",
-    "test:keypool": "tsx scripts/test-keypool.ts"
+    "test:keypool": "tsx scripts/test-keypool.ts",
+    "pipeline": "tsx src/pipeline/cli.ts"
   },
   "dependencies": {
     "@google/genai": "^2.11.0",
     "@xyflow/react": "^12.11.2",
     "better-sqlite3": "^12.11.1",
+    "chokidar": "^3.6.0",
+    "diff-match-patch": "^1.0.5",
     "dotenv": "^17.4.2",
-    "react-markdown": "^10.1.0"
+    "react-markdown": "^10.1.0",
+    "web-tree-sitter": "^0.24.6"
   },
   "devDependencies": {
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron-toolkit/utils": "^4.0.0",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/diff-match-patch": "^1.0.36",
     "@types/node": "^22.15.0",
     "@types/react": "^19.2.3",
     "@types/react-dom": "^19.2.3",
