@@ -6,6 +6,7 @@
     "src/app/preload/**/*",
     "src/shared/**/*",
     "src/ai/**/*",
+    "src/pipeline/**/*.ts",
     "db/**/*"
   ],
   "compilerOptions": {
@@ -14,7 +15,8 @@
     "paths": {
       "@shared/*": ["./src/shared/*"],
       "@db/*": ["./db/*"],
-      "@ai/*": ["./src/ai/*"]
+      "@ai/*": ["./src/ai/*"],
+      "@pipeline/*": ["./src/pipeline/*"]
     }
   }
 }

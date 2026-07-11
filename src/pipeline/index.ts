@@ -10,7 +10,7 @@ import { tailSessionEvents } from './observation/session-events-tail.js';
 import { watchManualEdits } from './observation/manual-watch.js';
 import { initDb } from './db/init.js';
 import { Repo } from './db/repo.js';
-import { parseSource, langForFilePath } from './ast-diff/parser.js';
+import { configureParser, parseSource, langForFilePath } from './ast-diff/parser.js';
 import { extractUnits, type CodeUnitCandidate } from './ast-diff/unit-extractor.js';
 import { matchUnits } from './ast-diff/unit-matcher.js';
 import { extractEdges } from './ast-diff/edge-extractor.js';
@@ -45,7 +45,8 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
   const emitter = new EventEmitter();
   const projectDir = getClaudeProjectDir(config.projectPath);
 
-  const db = initDb(config.dbPath);
+  configureParser(config.assets);
+  const db = initDb(config.dbPath, config.assets.schemaPath);
   const repo = new Repo(db);
   const snapshotCache = new SnapshotCache();
   const planTracker = new PlanTracker();
@@ -124,7 +125,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
   // 그 에러를 그대로 throw해 프로세스를 죽인다. 호출자가 handle.on('error', ...)을 붙일 시간을 준다.
   setImmediate(() => {
     try {
-      installHooks(config.projectPath);
+      installHooks(config.projectPath, config.assets.hookScriptPath);
     } catch (err) {
       // 훅 설치 실패(권한 문제 등)가 파이프라인 전체를 멈추면 안 된다 — 나머지 관찰은 계속 동작해야 함.
       emitter.emit('error', err);
@@ -251,8 +252,9 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
         const filePath = row.file_path;
         if (!filePath) break;
 
+        // after는 여기서 쓰지 않는다 — applyEdit/applyWrite가 캐시를 이미 갱신했고,
+        // 실제 after는 디바운스 만료 시점에 flushPendingDiff가 캐시에서 다시 읽는다.
         let before: string;
-        let after: string;
         if (row.tool_name === 'Edit') {
           if (!snapshotCache.has(filePath)) {
             // 캐시 미스 폴백(설계상 드문 경로): Read 없이 첫 Edit이 온 경우 등.
@@ -262,10 +264,10 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
             snapshotCache.seedFromDisk(filePath);
           }
           const input = original.input as EditInput;
-          ({ before, after } = snapshotCache.applyEdit(filePath, input.old_string, input.new_string, Boolean(input.replace_all)));
+          ({ before } = snapshotCache.applyEdit(filePath, input.old_string, input.new_string, Boolean(input.replace_all)));
         } else {
           const input = original.input as WriteInput;
-          ({ before, after } = snapshotCache.applyWrite(filePath, input.content));
+          ({ before } = snapshotCache.applyWrite(filePath, input.content));
         }
 
         const promptIdForVersion = currentPromptIdBySession.get(event.sessionId) ?? null;

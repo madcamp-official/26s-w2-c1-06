@@ -1,9 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const HOOK_SCRIPT_PATH = path.resolve(__dirname, '..', 'hooks', 'session-event-hook.mjs');
 
 interface HookCommandEntry {
   type: 'command';
@@ -22,14 +18,19 @@ interface ClaudeSettings {
   [key: string]: unknown;
 }
 
-function buildHookCommand(): string {
-  // node가 PATH에 없는 환경에서도 동작하도록 현재 실행 중인 node 바이너리 경로를 그대로 쓴다.
-  return `"${process.execPath}" "${HOOK_SCRIPT_PATH}"`;
+function buildHookCommand(hookScriptPath: string): string {
+  // CLI(node/tsx) 실행이면: node가 PATH에 없는 환경에서도 동작하도록 현재 실행 중인
+  // node 바이너리 경로를 그대로 쓴다.
+  // Electron main 안에서 실행되면: process.execPath가 Electron 바이너리라 그대로 쓰면
+  // 훅이 불릴 때마다 앱이 통째로 또 켜진다 — 이 경우 PATH의 node에 위임한다
+  // (Claude Code 자체가 Node 기반이라 훅 실행 환경에는 node가 있다고 가정해도 안전).
+  const runner = process.versions.electron ? 'node' : `"${process.execPath}"`;
+  return `${runner} "${hookScriptPath}"`;
 }
 
-function ensureHookRegistered(hooks: HooksSection, eventName: string, matcher: string | undefined): void {
+function ensureHookRegistered(hooks: HooksSection, eventName: string, matcher: string | undefined, hookScriptPath: string): void {
   if (!Array.isArray(hooks[eventName])) hooks[eventName] = [];
-  const command = buildHookCommand();
+  const command = buildHookCommand(hookScriptPath);
 
   const alreadyRegistered = hooks[eventName].some(
     (group) => Array.isArray(group?.hooks) && group.hooks.some((h) => h?.type === 'command' && h?.command === command)
@@ -51,7 +52,7 @@ function ensureHookRegistered(hooks: HooksSection, eventName: string, matcher: s
  * 훅 문서 확인 결과). 세션이 실제로 끝나는 시점(정상 종료/Ctrl-C 등)을 안정적으로
  * 잡으려면 `SessionEnd`를 써야 한다 — 이 구현은 SessionEnd를 사용한다.
  */
-export function installHooks(targetProjectPath: string): void {
+export function installHooks(targetProjectPath: string, hookScriptPath: string): void {
   const claudeDir = path.join(targetProjectPath, '.claude');
   const settingsPath = path.join(claudeDir, 'settings.json');
 
@@ -67,9 +68,9 @@ export function installHooks(targetProjectPath: string): void {
 
   settings.hooks ??= {};
   // SessionStart: matcher 생략 → startup/resume/clear/compact 전부에서 발생
-  ensureHookRegistered(settings.hooks, 'SessionStart', undefined);
+  ensureHookRegistered(settings.hooks, 'SessionStart', undefined, hookScriptPath);
   // SessionEnd: matcher를 빈 문자열로 두면 모든 reason(clear/resume/logout/other 등)에 매칭
-  ensureHookRegistered(settings.hooks, 'SessionEnd', '');
+  ensureHookRegistered(settings.hooks, 'SessionEnd', '', hookScriptPath);
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf8');
 }

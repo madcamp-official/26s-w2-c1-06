@@ -11,10 +11,12 @@ import type {
   CodeUnitEdge,
   CodeUnitVersionWithUnit,
   LectureNote,
+  PipelineHandle,
   Prompt,
   SkillLevel,
   ToolEvent
 } from '@shared/types'
+import { startPipeline } from '@pipeline/index'
 import { startCaptionWorker } from './caption-worker'
 import { startLectureNoteWorker } from './lecture-note-worker'
 import { createContextBundleLoader, createSessionTraceLoader } from './session-trace'
@@ -37,6 +39,40 @@ const stopCaptionWorker = startCaptionWorker(db, aiProvider)
 const stopLectureNoteWorker = startLectureNoteWorker(db, aiProvider)
 const loadSessionTrace = createSessionTraceLoader(db)
 const loadContextBundle = createContextBundleLoader(db)
+
+// SPEC 4.6 통합 모드: Person A의 관찰 파이프라인을 main 프로세스 내 모듈로 실행
+// (SQLite 동시 쓰기 문제 원천 차단). 파이프라인은 같은 DB 파일에 자기 커넥션을
+// 하나 더 여는데, WAL + busy_timeout이라 단일 프로세스 내 2-커넥션은 안전하다.
+// 관찰 대상 프로젝트는 FACTCODING_PROJECT_PATH로 지정, 없으면 이 앱을 실행한
+// 리포 자체를 관찰한다 (dev에서 셀프 관찰 데모가 됨).
+// 정적 자산 경로는 import.meta/__dirname 대신 여기서 명시적으로 계산해 주입한다
+// (번들링되면 그 경로들이 산출물 위치를 가리키게 되므로 — db/connection.ts와 같은 이유).
+const pipelineAssets = app.isPackaged
+  ? {
+      schemaPath,
+      coreWasmPath: join(process.resourcesPath, 'pipeline', 'tree-sitter.wasm'),
+      grammarsDir: join(process.resourcesPath, 'pipeline', 'grammars'),
+      hookScriptPath: join(process.resourcesPath, 'pipeline', 'hooks', 'session-event-hook.mjs')
+    }
+  : {
+      schemaPath,
+      coreWasmPath: join(app.getAppPath(), 'node_modules', 'web-tree-sitter', 'tree-sitter.wasm'),
+      grammarsDir: join(app.getAppPath(), 'src', 'pipeline', 'ast-diff', 'grammars'),
+      hookScriptPath: join(app.getAppPath(), 'src', 'pipeline', 'hooks', 'session-event-hook.mjs')
+    }
+
+let pipeline: PipelineHandle | null = null
+if (process.env.FACTCODING_DISABLE_PIPELINE !== '1') {
+  pipeline = startPipeline({
+    projectPath: process.env.FACTCODING_PROJECT_PATH ?? app.getAppPath(),
+    dbPath,
+    assets: pipelineAssets
+  })
+  pipeline.on('error', (err) => console.error('[pipeline]', err))
+  pipeline.on('session-file-changed', (filePath) =>
+    console.log('[pipeline] tailing session file:', filePath)
+  )
+}
 
 const getToolEventsBySession = db.prepare(`
   SELECT * FROM tool_events
@@ -312,6 +348,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopCaptionWorker()
   stopLectureNoteWorker()
+  pipeline?.stop() // 파이프라인이 자기 DB 커넥션을 닫는다 — 우리 커넥션 close보다 먼저
   db.close()
   if (process.platform !== 'darwin') app.quit()
 })

@@ -9,6 +9,15 @@ files:
   - '!node_modules/**/*.map'
 asarUnpack:
   - '**/*.node'
+# 파이프라인 런타임 자산 — main 번들 밖에서 파일로 직접 읽어야 하는 것들
+# (src/app/main/index.ts의 packaged 분기 pipelineAssets 경로와 짝을 이룸)
+extraResources:
+  - from: src/pipeline/ast-diff/grammars
+    to: pipeline/grammars
+  - from: src/pipeline/hooks/session-event-hook.mjs
+    to: pipeline/hooks/session-event-hook.mjs
+  - from: node_modules/web-tree-sitter/tree-sitter.wasm
+    to: pipeline/tree-sitter.wasm
 win:
   target: nsis
 mac:

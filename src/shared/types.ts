@@ -147,11 +147,29 @@ export type TranscriptEvent =
   | ParsedToolResult
   | ParsedAssistantText
 
+/**
+ * 파이프라인이 런타임에 읽어야 하는 정적 자산들의 절대 경로. 이 저장소 규칙상
+ * (db/connection.ts 참조) __dirname/import.meta.url 기반 계산은 vite 번들링 시
+ * 산출물 경로를 가리키게 되므로, 항상 호출부(CLI는 config.ts의 loadConfig,
+ * Electron main은 app.getAppPath()/process.resourcesPath 기준)가 정해서 넘긴다.
+ */
+export interface PipelineAssetPaths {
+  /** db/schema.sql */
+  schemaPath: string
+  /** web-tree-sitter 코어 wasm (node_modules/web-tree-sitter/tree-sitter.wasm) */
+  coreWasmPath: string
+  /** 언어별 grammar wasm 디렉토리 (src/pipeline/ast-diff/grammars) */
+  grammarsDir: string
+  /** SessionStart/SessionEnd 훅 스크립트 (src/pipeline/hooks/session-event-hook.mjs) */
+  hookScriptPath: string
+}
+
 export interface PipelineConfig {
   /** 관찰 대상 프로젝트 절대 경로 (~/.claude/projects/<hash> 매핑에 사용) */
   projectPath: string
   /** SQLite DB 파일 경로 */
   dbPath: string
+  assets: PipelineAssetPaths
 }
 
 export interface PipelineHandle {

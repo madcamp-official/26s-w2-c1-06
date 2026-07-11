@@ -1,7 +1,11 @@
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type { PipelineConfig } from '../shared/types.js';
+
+// ⚠️ 이 모듈은 CLI(cli.ts) 전용이다 — top-level import.meta.url을 쓰므로 Electron main
+// 번들(CJS)에 절대 import하면 안 된다. Electron 쪽은 src/app/main/index.ts가
+// app.getAppPath()/process.resourcesPath 기준으로 같은 구조의 assets를 직접 만든다.
+// (CLAUDE_PROJECTS_DIR은 양쪽에서 쓰여 session-locator.ts로 옮겼다.)
 
 // src/pipeline/config.ts 기준 프로젝트 루트(FactCoding/) 계산
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -9,11 +13,17 @@ export const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 export const SCHEMA_PATH = path.join(REPO_ROOT, 'db', 'schema.sql');
 
-export const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
-
 export function loadConfig(): PipelineConfig {
   return {
     projectPath: process.env.FACTCODING_PROJECT_PATH ?? process.cwd(),
-    dbPath: process.env.FACTCODING_DB_PATH ?? path.join(REPO_ROOT, 'factcoding.db'),
+    // Electron 앱(dev)과 같은 DB를 보도록 db/factcoding.db로 통일 — 예전 기본값은
+    // 리포 루트의 factcoding.db였는데, CLI로 채운 데이터가 앱에 안 보이는 원인이 됐다.
+    dbPath: process.env.FACTCODING_DB_PATH ?? path.join(REPO_ROOT, 'db', 'factcoding.db'),
+    assets: {
+      schemaPath: SCHEMA_PATH,
+      coreWasmPath: path.join(REPO_ROOT, 'node_modules', 'web-tree-sitter', 'tree-sitter.wasm'),
+      grammarsDir: path.join(REPO_ROOT, 'src', 'pipeline', 'ast-diff', 'grammars'),
+      hookScriptPath: path.join(REPO_ROOT, 'src', 'pipeline', 'hooks', 'session-event-hook.mjs'),
+    },
   };
 }

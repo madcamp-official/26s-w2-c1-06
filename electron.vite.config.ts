@@ -14,7 +14,8 @@ export default defineConfig({
       alias: {
         '@shared': resolve(__dirname, 'src/shared'),
         '@db': resolve(__dirname, 'db'),
-        '@ai': resolve(__dirname, 'src/ai')
+        '@ai': resolve(__dirname, 'src/ai'),
+        '@pipeline': resolve(__dirname, 'src/pipeline')
       }
     }
   },
