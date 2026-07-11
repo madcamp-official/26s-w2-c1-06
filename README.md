@@ -30,7 +30,7 @@
 ## 선택 옵션
 
 - [ ] 실시간 인터랙션
-- [O] LLM Wrapper
+- [ ] LLM Wrapper
 - [ ] Cross-Platform
 
 ---
