@@ -1,0 +1,44 @@
+{
+  "name": "factcoding",
+  "version": "0.1.0",
+  "description": "Vibecoding 에이전트 작업을 실시간 관찰·해설하고 복습 가능한 문서로 남기는 학습용 데스크톱 앱",
+  "main": "./out/main/index.js",
+  "author": "factcoding",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "build:win": "electron-vite build && electron-builder --win",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "db:init": "tsx db/init.ts",
+    "db:seed": "tsx db/seed.ts",
+    "test:keypool": "tsx scripts/test-keypool.ts"
+  },
+  "dependencies": {
+    "@google/genai": "^2.11.0",
+    "@xyflow/react": "^12.11.2",
+    "better-sqlite3": "^12.11.1",
+    "dotenv": "^17.4.2",
+    "react-markdown": "^10.1.0"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/tsconfig": "^2.0.0",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.0",
+    "@types/react": "^19.2.3",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.1",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6"
+  }
+}

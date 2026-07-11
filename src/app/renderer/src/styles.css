@@ -1,0 +1,631 @@
+:root {
+  color-scheme: light dark;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+.app__header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #3333;
+}
+
+.app__header h1 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.app__session {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0.6;
+  font-family: monospace;
+}
+
+.skill-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: #8882;
+}
+
+.skill-toggle__btn {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.skill-toggle__btn--active {
+  background: canvas;
+  box-shadow: 0 1px 2px #0003;
+  font-weight: 600;
+}
+
+.app__main {
+  padding: 16px 20px;
+}
+
+.app__main--split {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.app__pane {
+  min-width: 0; /* grid 자식이 내용 폭 때문에 넘치는 것 방지 */
+}
+
+.app__pane-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.app__pane-title--spaced {
+  margin-top: 18px;
+}
+
+.app__pane--full {
+  padding: 0 20px 20px;
+}
+
+.context-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 20px;
+  background: color-mix(in srgb, canvas 92%, canvasText 8%);
+  border-bottom: 1px solid #3333;
+  font-size: 13px;
+}
+
+.context-bar__row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.context-bar__row--plan {
+  align-items: flex-start;
+}
+
+.context-bar__label {
+  flex: 0 0 40px;
+  font-size: 11px;
+  opacity: 0.6;
+  text-transform: uppercase;
+}
+
+.context-bar__progress {
+  font-family: monospace;
+}
+
+.context-bar__plan {
+  margin: 0;
+  font-family: inherit;
+  font-size: 12px;
+  white-space: pre-wrap;
+  opacity: 0.85;
+}
+
+.trace-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.trace-panel--empty {
+  opacity: 0.6;
+  font-size: 13px;
+}
+
+.trace-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trace-turn__header {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.trace-turn__index {
+  font-size: 11px;
+  font-weight: 400;
+  font-family: monospace;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.trace-turn__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-turn__events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trace-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border-left: 3px solid #8888;
+  font-size: 13px;
+}
+
+.trace-item--success {
+  border-left-color: #2ea043;
+}
+
+.trace-item--error {
+  border-left-color: #d1242f;
+}
+
+.trace-item--pending {
+  border-left-color: #d29922;
+}
+
+.trace-item__row {
+  display: grid;
+  grid-template-columns: 90px 70px 1fr 70px 60px auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.trace-item__time,
+.trace-item__duration {
+  font-family: monospace;
+  opacity: 0.7;
+}
+
+.trace-item__tool {
+  font-weight: 600;
+}
+
+.trace-item__file {
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-item__badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #8884;
+}
+
+.trace-item__caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-left: 4px;
+  font-size: 12px;
+}
+
+.trace-item__caption-text {
+  opacity: 0.85;
+}
+
+.trace-item__caption-text--pending {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.trace-item__tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, canvasText 12%, transparent);
+  opacity: 0.8;
+}
+
+.unit-timeline--empty {
+  opacity: 0.6;
+  font-size: 13px;
+}
+
+.structure-overview {
+  height: 220px;
+  border: 1px solid #8884;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.structure-overview--empty {
+  height: auto;
+  border: none;
+  padding: 0;
+  opacity: 0.6;
+  font-size: 13px;
+}
+
+/* React Flow는 라이트 테마 기본값이라 다크 모드에서 배경을 앱 팔레트에 맞춘다 */
+.structure-overview .react-flow {
+  background: transparent;
+}
+
+.version-chain {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-left: 2px solid #8884;
+}
+
+.version-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, canvas 96%, canvasText 4%);
+  font-size: 13px;
+}
+
+.version-card__header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.version-card__no {
+  font-family: monospace;
+  font-weight: 600;
+}
+
+.version-card__change {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #8884;
+}
+
+.version-card__change--created {
+  background: #2ea04333;
+}
+
+.version-card__change--modified {
+  background: #d2992233;
+}
+
+.version-card__change--deleted {
+  background: #d1242f33;
+}
+
+.version-card__time {
+  margin-left: auto;
+  font-family: monospace;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.version-card__caption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.version-card__caption--pending {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.version-card__details summary {
+  font-size: 11px;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.version-card__diff {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, canvasText 8%, transparent);
+  font-size: 11px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.lecture-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lecture-notes--empty {
+  opacity: 0.6;
+  font-size: 13px;
+}
+
+.lecture-note {
+  border: 1px solid #8884;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.lecture-note__header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.lecture-note__skill {
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #8884;
+}
+
+.lecture-note__session {
+  margin-left: auto;
+  font-family: monospace;
+}
+
+.lecture-note__body {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.lecture-note__body :first-child {
+  margin-top: 0;
+}
+
+.lecture-note__body pre {
+  overflow-x: auto;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, canvasText 8%, transparent);
+}
+
+.lecture-note-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lecture-note-group__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.lecture-note__session {
+  font-family: monospace;
+}
+
+.lecture-note-group__regen {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.lecture-note-group__regen-btn {
+  border: 1px solid #8884;
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.lecture-note-group__regen-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.version-card__overrides {
+  display: flex;
+  gap: 6px;
+  padding-left: 4px;
+}
+
+.version-card__override-btn {
+  border: 1px solid #8884;
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.version-card__override-btn--active {
+  opacity: 1;
+  background: color-mix(in srgb, canvasText 12%, transparent);
+  font-weight: 600;
+}
+
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, canvasText 35%, transparent);
+}
+
+.onboarding-modal {
+  width: min(480px, 90vw);
+  padding: 24px;
+  border-radius: 12px;
+  background: canvas;
+  color: canvasText;
+  box-shadow: 0 12px 40px #0006;
+}
+
+.onboarding-modal h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.onboarding-modal__desc {
+  margin: 0 0 18px;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.onboarding-modal__options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.onboarding-modal__option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #8884;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.onboarding-modal__option:hover {
+  background: color-mix(in srgb, canvasText 6%, transparent);
+}
+
+.onboarding-modal__option-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.onboarding-modal__option-desc {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.qna-toggle {
+  border: 1px solid #8884;
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.qna-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.qna-panel {
+  position: fixed;
+  top: 52px;
+  right: 20px;
+  z-index: 5;
+  width: min(360px, 90vw);
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #8884;
+  border-radius: 10px;
+  background: canvas;
+  color: canvasText;
+  box-shadow: 0 8px 28px #0005;
+  overflow: hidden;
+}
+
+.qna-panel__history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.qna-panel__empty {
+  opacity: 0.6;
+  font-size: 12px;
+}
+
+.qna-panel__pending {
+  opacity: 0.6;
+  font-size: 12px;
+  font-style: italic;
+}
+
+.qna-exchange {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qna-exchange__question {
+  font-weight: 600;
+}
+
+.qna-exchange__answer {
+  opacity: 0.85;
+  white-space: pre-wrap;
+}
+
+.qna-panel__input-row {
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid #8884;
+}
+
+.qna-panel__input {
+  flex: 1;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #8884;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+}

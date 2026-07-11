@@ -1,0 +1,17 @@
+appId: com.factcoding.app
+productName: Factcoding
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - db/schema.sql
+  - '!node_modules/**/*.map'
+asarUnpack:
+  - '**/*.node'
+win:
+  target: nsis
+mac:
+  target: dmg
+  category: public.app-category.education
+npmRebuild: true
