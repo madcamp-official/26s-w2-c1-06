@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# 로컬 머신 전용 상태 — 절대경로가 박혀있거나(.claude/settings.json) 런타임에
+# 생성되는 파일(.factcoding/)이라 공유 저장소에 커밋하면 안 됨.
+.claude/
+.factcoding/
