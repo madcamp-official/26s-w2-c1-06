@@ -22,15 +22,15 @@
 
 | 이름 | 학교 | GitHub | 역할 |
 |---|---|---|---|
-| 유영석 |  |  |  |
-| 허서준 |  |  |  |
+| 유영석 | KAIST | github.com/yskstuff | 개발자 |
+| 허서준 | 서강대학교 | github.com/gjtjwns06-ui | 개발자 |
 
 ---
 
 ## 선택 옵션
 
 - [ ] 실시간 인터랙션
-- [ ] LLM Wrapper
+- [O] LLM Wrapper
 - [ ] Cross-Platform
 
 ---
