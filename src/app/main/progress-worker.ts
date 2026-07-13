@@ -180,7 +180,7 @@ export function startProgressWorker(
 
       const row = db
         .prepare(
-          `SELECT summary, key_code_snippet, key_code_lang, key_code_file, key_code_reason
+          `SELECT summary, key_code_snippet, key_code_lang, key_code_file, key_code_reason, step_percent
            FROM ai_explanations WHERE target_type = 'step' AND target_id = @target_id AND skill_level = @skill_level`
         )
         .get({ target_id: step.id, skill_level: skillLevel }) as
@@ -190,22 +190,34 @@ export function startProgressWorker(
             key_code_lang: string | null
             key_code_file: string | null
             key_code_reason: string | null
+            step_percent: number | null
           }
         | undefined
 
-      let summary = row?.summary ?? ''
-      let keyCode: CaptionRow['keyCode'] = null
-      if (row?.key_code_snippet && row.key_code_lang && row.key_code_file && row.key_code_reason) {
-        keyCode = {
-          snippet: row.key_code_snippet,
-          lang: row.key_code_lang,
-          filePath: row.key_code_file,
-          reason: row.key_code_reason
-        }
+      // 이 스텝이 이전 실행에서 이미 퍼센트에 반영된 적 있으면(step_percent가 저장돼
+      // 있으면) processedStepIds(이번 실행 한정 메모리)엔 없어도 다시 카운트하면 안
+      // 된다 — 앱 재시작마다 옛날 스텝을 "새로 완료"로 잘못 세서 퍼센트가 실제보다
+      // 부풀거나(중복 카운트), 렌더러에서 같은 stepId가 히스토리에 두 번 들어가는
+      // 문제(React key 충돌)로 실제 이어졌다. db:getProgressState가 이미 이 값을
+      // 재수화하므로 여기선 조용히 스킵하고 메모리에도 처리됨으로 표시만 해둔다.
+      if (row && row.step_percent !== null) {
+        processedStepIds.add(step.id)
+        continue
       }
-      if (!summary) summary = fallbackSummaryFromNote(step.note?.text)
 
-      emitProgress(step.id, summary, keyCode)
+      // 위에서 step_percent가 있는 행은 이미 continue했으므로, 여기 도달했다는 건
+      // row가 아예 없다는 뜻(한 번도 처리된 적 없는 스텝) — note 기반 폴백 요약을 쓴다.
+      const summary = fallbackSummaryFromNote(step.note?.text)
+      const percent = emitProgress(step.id, summary, null)
+      // 폴백도 Gemini 성공 경로와 동일하게 DB에 남겨야, 다음 재시작 때 이미 카운트된
+      // 스텝으로 인식돼(위 step_percent 체크) 또 세지 않는다 — 안 남기면 Gemini가
+      // 끝내 이 스텝을 못 봐도(예: 세션 종료) 재시작마다 중복 카운트가 반복된다.
+      if (percent !== null) {
+        saveCaptions(
+          [{ targetType: 'step', targetId: step.id, summary, keyCode: null, stepPercent: percent, conceptTags: [] }],
+          skillLevel
+        )
+      }
       processed += 1
     }
     return processed
