@@ -27,6 +27,107 @@ body {
   font-family: monospace;
 }
 
+.monitoring-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.monitoring-control__status {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+.monitoring-control__status--active {
+  opacity: 1;
+  color: #2ea043;
+  font-weight: 600;
+}
+
+.monitoring-control__btn {
+  border: 1px solid #8884;
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.monitoring-control__btn--primary {
+  background: #2ea043;
+  border-color: #2ea043;
+  color: white;
+  font-weight: 600;
+}
+
+.monitoring-control__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.session-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px;
+  overflow-x: auto;
+  border-bottom: 1px solid #3333;
+}
+
+.session-list--empty {
+  font-size: 12px;
+  opacity: 0.5;
+}
+
+.session-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  border: 1px solid #8884;
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.session-chip--selected {
+  border-color: #58a6ff;
+  background: color-mix(in srgb, #58a6ff 15%, transparent);
+}
+
+.session-chip--live {
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.session-chip__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8888;
+}
+
+.session-chip__dot--active {
+  background: #2ea043;
+}
+
+.session-chip__id {
+  font-family: monospace;
+}
+
+.session-chip__time {
+  opacity: 0.6;
+}
+
+.session-chip__badge {
+  opacity: 0.6;
+}
+
 .skill-toggle {
   display: inline-flex;
   gap: 2px;

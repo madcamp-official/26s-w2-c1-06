@@ -11,7 +11,12 @@ interface UseSessionTraceResult {
   loading: boolean
 }
 
-export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
+// pinnedSessionId가 주어지면(세션 목록에서 과거 세션을 선택한 경우) 그 세션을 고정해서
+// 보여주고, null/undefined면 기존처럼 "가장 최근 세션"을 계속 따라간다(라이브 뷰).
+export function useSessionTrace(
+  skillLevel: SkillLevel,
+  pinnedSessionId?: string | null
+): UseSessionTraceResult {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [prompts, setPrompts] = useState<Prompt[]>([])
   const [events, setEvents] = useState<ToolEvent[]>([])
@@ -19,6 +24,11 @@ export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    if (pinnedSessionId) {
+      setSessionId(pinnedSessionId)
+      return
+    }
+
     let cancelled = false
 
     window.factcoding.getLatestSessionId().then((id) => {
@@ -30,7 +40,7 @@ export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [pinnedSessionId])
 
   useEffect(() => {
     if (!sessionId) return
@@ -52,13 +62,14 @@ export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
     }
 
     fetchTrace()
-    const timer = setInterval(fetchTrace, POLL_INTERVAL_MS)
+    // 과거(고정된) 세션은 더 이상 안 바뀌므로 폴링할 필요가 없다 — 라이브 세션만 폴링.
+    const timer = pinnedSessionId ? null : setInterval(fetchTrace, POLL_INTERVAL_MS)
 
     return () => {
       cancelled = true
-      clearInterval(timer)
+      if (timer) clearInterval(timer)
     }
-  }, [sessionId, skillLevel])
+  }, [sessionId, skillLevel, pinnedSessionId])
 
   return { sessionId, prompts, events, explanations, loading }
 }

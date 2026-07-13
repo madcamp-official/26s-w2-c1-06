@@ -57,7 +57,8 @@ export function TracePanel({ prompts, events, explanations, loading }: TracePane
   if (events.length === 0) {
     return (
       <div className="trace-panel trace-panel--empty">
-        표시할 tool_event가 없습니다. `npm run db:init && npm run db:seed`를 실행했는지 확인하세요.
+        아직 표시할 활동이 없습니다. 헤더의 &quot;시작하기&quot;를 눌러 모니터링을 시작하세요
+        (개발용 목업 데이터가 필요하면 `npm run db:init && npm run db:seed`).
       </div>
     )
   }

@@ -313,7 +313,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
           });
         }
       },
-      { onError: (err) => emitter.emit('error', err) }
+      { startAtEnd: config.startAtEnd, onError: (err) => emitter.emit('error', err) }
     );
     emitter.emit('session-file-changed', filePath);
   }
@@ -331,8 +331,12 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
     }
   }
 
+  // installHooks와 같은 이유로 setImmediate: attachTo가 여기서 바로 실행되면
+  // 'session-file-changed'가 startPipeline()이 핸들을 반환하기도 전에 동기적으로 emit돼,
+  // 호출자가 handle.on('session-file-changed', ...)을 붙이기 전에 첫 이벤트를 놓친다
+  // (실제로 겪은 버그: Electron main이 그 이벤트로 현재 session id를 추적하는데 항상 null이었음).
   const initial = findLatestSessionFile(projectDir);
-  if (initial) attachTo(initial);
+  if (initial) setImmediate(() => attachTo(initial));
 
   const sessionCheckTimer = setInterval(checkForNewerSession, SESSION_FILE_POLL_MS);
 

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { config as loadEnv } from 'dotenv'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { applySchema, openDatabase } from '@db/connection'
 import { createAIProvider } from '@ai/createAIProvider'
 import type {
@@ -13,6 +13,7 @@ import type {
   LectureNote,
   PipelineHandle,
   Prompt,
+  Session,
   SkillLevel,
   ToolEvent
 } from '@shared/types'
@@ -61,17 +62,46 @@ const pipelineAssets = app.isPackaged
       hookScriptPath: join(app.getAppPath(), 'src', 'pipeline', 'hooks', 'session-event-hook.mjs')
     }
 
+// 사용자가 여러 AI 에이전트/프로젝트를 동시에 다룰 수 있어(코딩이 아닌 작업도 포함),
+// 앱을 켜자마자 무조건 관찰을 시작하지 않는다 — 헤더의 "시작하기"를 눌러야 그 시점부터만
+// 관찰을 켠다(PipelineConfig.startAtEnd: true로 그 이전 내용은 스킵). "완료"를 누르면
+// 관찰을 멈추고 그 세션을 종료 처리해 강의노트 자동 합성을 트리거한다(SPEC 4.3.2).
 let pipeline: PipelineHandle | null = null
-if (process.env.FACTCODING_DISABLE_PIPELINE !== '1') {
-  pipeline = startPipeline({
+let monitoringSessionId: string | null = null
+
+function buildPipelineConfig() {
+  return {
     projectPath: process.env.FACTCODING_PROJECT_PATH ?? app.getAppPath(),
     dbPath,
-    assets: pipelineAssets
-  })
+    assets: pipelineAssets,
+    startAtEnd: true
+  }
+}
+
+function startMonitoring(): void {
+  if (pipeline) return // 이미 관찰 중이면 아무것도 안 함 (버튼 연타 방지)
+  monitoringSessionId = null
+  pipeline = startPipeline(buildPipelineConfig())
   pipeline.on('error', (err) => console.error('[pipeline]', err))
-  pipeline.on('session-file-changed', (filePath) =>
+  pipeline.on('session-file-changed', (filePath) => {
+    // 세션 파일명이 곧 sessions.id다 (schema.sql 주석 참조) — DB에 아직 row가 없어도
+    // "완료" 클릭 시 markSessionEnded에 넘길 id를 여기서 바로 알 수 있다.
+    monitoringSessionId = basename(filePath, '.jsonl')
     console.log('[pipeline] tailing session file:', filePath)
-  )
+  })
+}
+
+function completeMonitoring(): void {
+  if (!pipeline) return
+  if (monitoringSessionId) pipeline.markSessionEnded(monitoringSessionId)
+  pipeline.stop()
+  pipeline = null
+  monitoringSessionId = null
+}
+
+if (process.env.FACTCODING_AUTOSTART_PIPELINE === '1') {
+  // 데모/디버깅 전용 뒷문 — 기본 동작은 항상 수동 "시작하기"다.
+  startMonitoring()
 }
 
 const getToolEventsBySession = db.prepare(`
@@ -131,6 +161,10 @@ const getAllLectureNotes = db.prepare(`
   SELECT * FROM lecture_notes ORDER BY created_at DESC
 `)
 
+const getAllSessions = db.prepare(`
+  SELECT * FROM sessions ORDER BY started_at DESC
+`)
+
 const getOnboardingCompletedStmt = db.prepare(`
   SELECT value FROM user_settings WHERE key = 'onboarding_completed'
 `)
@@ -175,6 +209,22 @@ function registerIpcHandlers(): void {
   ipcMain.handle('db:getLatestSessionId', (): string | null => {
     const row = getLatestSessionId.get() as { id: string } | undefined
     return row?.id ?? null
+  })
+
+  ipcMain.handle('pipeline:startMonitoring', (): void => {
+    startMonitoring()
+  })
+
+  ipcMain.handle('pipeline:completeMonitoring', (): void => {
+    completeMonitoring()
+  })
+
+  ipcMain.handle('pipeline:getMonitoringStatus', (): { isMonitoring: boolean; sessionId: string | null } => {
+    return { isMonitoring: pipeline !== null, sessionId: monitoringSessionId }
+  })
+
+  ipcMain.handle('db:getSessions', (): Session[] => {
+    return getAllSessions.all() as Session[]
   })
 
   ipcMain.handle('db:getToolEvents', (_event, sessionId: string): ToolEvent[] => {

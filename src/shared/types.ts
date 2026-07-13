@@ -170,6 +170,13 @@ export interface PipelineConfig {
   /** SQLite DB 파일 경로 */
   dbPath: string
   assets: PipelineAssetPaths
+  /**
+   * true면 현재 세션 파일의 "지금 이 시점"부터만 tail한다(기존 내용은 스킵).
+   * Electron의 "시작하기" 버튼처럼 사용자가 명시적으로 관찰을 켠 시점부터만
+   * 보고 싶을 때 켠다. CLI 기본값(false/미지정)은 항상 파일 처음부터 리플레이한다
+   * (디버깅 시 과거 세션 전체를 다시 보고 싶은 경우가 많아서).
+   */
+  startAtEnd?: boolean
 }
 
 export interface PipelineHandle {

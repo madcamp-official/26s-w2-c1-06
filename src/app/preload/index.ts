@@ -6,9 +6,15 @@ import type {
   CodeUnitVersionWithUnit,
   LectureNote,
   Prompt,
+  Session,
   SkillLevel,
   ToolEvent
 } from '@shared/types'
+
+export interface MonitoringStatus {
+  isMonitoring: boolean
+  sessionId: string | null
+}
 
 const factcodingApi = {
   getLatestSessionId: (): Promise<string | null> => ipcRenderer.invoke('db:getLatestSessionId'),
@@ -34,7 +40,11 @@ const factcodingApi = {
   regenerateLectureNote: (sessionId: string, skillLevel: SkillLevel): Promise<LectureNote | null> =>
     ipcRenderer.invoke('db:regenerateLectureNote', sessionId, skillLevel),
   answerQuestion: (sessionId: string, question: string, skillLevel: SkillLevel): Promise<string> =>
-    ipcRenderer.invoke('db:answerQuestion', sessionId, question, skillLevel)
+    ipcRenderer.invoke('db:answerQuestion', sessionId, question, skillLevel),
+  getSessions: (): Promise<Session[]> => ipcRenderer.invoke('db:getSessions'),
+  startMonitoring: (): Promise<void> => ipcRenderer.invoke('pipeline:startMonitoring'),
+  completeMonitoring: (): Promise<void> => ipcRenderer.invoke('pipeline:completeMonitoring'),
+  getMonitoringStatus: (): Promise<MonitoringStatus> => ipcRenderer.invoke('pipeline:getMonitoringStatus')
 }
 
 export type FactcodingApi = typeof factcodingApi
