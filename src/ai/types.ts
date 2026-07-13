@@ -30,7 +30,18 @@ export interface StepInput {
 
 export interface StepCaption {
   stepId: string
+  title: string
   caption: string
+  why: string
+  ttsScript: string
+  conceptTags: string[]
+}
+
+// 강의노트에 넣을 학습 스텝 요약(도구 나열 대신 탑다운 서사 우선).
+export interface StepSummaryForNote {
+  title: string
+  body: string
+  why: string
   conceptTags: string[]
 }
 
@@ -40,6 +51,7 @@ export interface SessionTrace {
   prompts: Prompt[]
   toolEvents: ToolEvent[]
   versions: CodeUnitVersionWithUnit[]
+  steps: StepSummaryForNote[]
 }
 
 // SPEC 4.3.3 Q&A 입력: 질문 시점까지의 구조(유닛+엣지) + 세션의 요청(prompt) 이력.

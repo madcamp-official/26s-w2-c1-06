@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID, createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { getClaudeProjectDir, findLatestSessionFile } from './observation/session-locator.js';
 import { tailFile, type FileTailer } from './observation/jsonl-tail.js';
 import { parseTranscriptLine, extractResultText } from './observation/transcript-parser.js';
@@ -18,6 +20,12 @@ import { computeUnitId } from './ast-diff/unit-id.js';
 import type { PipelineConfig, PipelineHandle, TranscriptEvent } from '../shared/types.js';
 
 const SESSION_FILE_POLL_MS = 2000;
+// 같은 프로젝트 디렉토리에서 관찰 대상이 아닌 다른 Claude Code 세션(예: 이 앱 자체를
+// 개발하며 나누는 잡담)이 동시에 열려 있으면, 그 세션이 새 줄을 쓸 때마다 mtime이 더
+// 최신이 되어 "가장 최근 수정 파일" 기준으로는 관찰 중이던 실제 코딩 세션을 밀어낸다
+// (실제로 재현된 버그). 지금 관찰 중인 세션이 이 시간 동안 조용해야만 "더 최신" 파일로
+// 갈아타는 걸 후보로 고려한다 — 활발히 관찰되고 있는 세션은 다른 세션의 활동만으로는 뺏기지 않는다.
+const SESSION_IDLE_SWITCH_MS = 3 * 60_000;
 // 빠른 연속 Edit을 배칭하기 위한 디바운스 — 매 Edit마다 파싱하면 의미 없는 중간 modified
 // 버전이 난립한다. tool_events 기록/캐시 치환은 디바운스 없이 즉시 처리하고, AST 파싱만 늦춘다.
 const AST_DIFF_DEBOUNCE_MS = 500;
@@ -309,11 +317,14 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
 
   let currentFile: string | null = null;
   let currentTailer: FileTailer | null = null;
+  let currentSessionId: string | null = null;
+  const endedSessionIds = new Set<string>();
   let stopped = false;
 
   function attachTo(filePath: string) {
     currentTailer?.stop();
     currentFile = filePath;
+    currentSessionId = path.basename(filePath, '.jsonl');
     currentTailer = tailFile(
       filePath,
       (line) => {
@@ -335,9 +346,20 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
     // 예외로 프로세스를 죽일 수 있다 — 여기서 흡수해 다음 polling도 계속 돌게 한다.
     try {
       const latest = findLatestSessionFile(projectDir);
-      if (latest && latest !== currentFile) {
-        attachTo(latest);
+      if (!latest || latest === currentFile) return;
+
+      if (currentFile) {
+        const currentEnded = currentSessionId !== null && endedSessionIds.has(currentSessionId);
+        let currentIdle: boolean;
+        try {
+          currentIdle = Date.now() - fs.statSync(currentFile).mtimeMs >= SESSION_IDLE_SWITCH_MS;
+        } catch {
+          currentIdle = true; // 파일이 사라졌으면 당연히 갈아탄다
+        }
+        if (!currentEnded && !currentIdle) return;
       }
+
+      attachTo(latest);
     } catch (err) {
       emitter.emit('error', err);
     }
@@ -358,6 +380,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
         repo.ensureSession(marker.sessionId, config.projectPath, marker.ts);
         repo.setSessionStartedAt(marker.sessionId, marker.ts);
       } else {
+        endedSessionIds.add(marker.sessionId);
         repo.setSessionEndedAt(marker.sessionId, marker.ts);
       }
     },

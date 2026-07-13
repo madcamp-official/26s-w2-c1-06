@@ -8,6 +8,20 @@ export type EdgeType = 'imports' | 'calls' | 'renders'
 export type SkillLevel = 'beginner' | 'intermediate' | 'advanced'
 export type AiExplanationTargetType = 'tool_event' | 'code_unit_version' | 'qna' | 'step'
 
+export interface UnitMatchStat {
+  unitId: string
+  versionCount: number
+  latestChangeType: ChangeType | null
+  lastSeenAt: string | null
+}
+
+export interface MatchStats {
+  success: number
+  error: number
+  pending: number
+  created: number
+}
+
 export interface Session {
   id: string
   project_path: string | null

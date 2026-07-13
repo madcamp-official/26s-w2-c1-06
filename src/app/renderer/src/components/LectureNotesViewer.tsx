@@ -36,17 +36,14 @@ function groupBySession(notes: LectureNote[]): SessionGroup[] {
   return order.map((sessionId) => ({ sessionId, notes: bySession.get(sessionId)! }))
 }
 
-// SPEC 4.5 강의노트 뷰어: lecture_notes를 세션별로 묶어 표시, Markdown 렌더.
-// SPEC 5.1: "다른 난이도로 다시 보고 싶으면 뷰어에서 재생성 요청(온디맨드)" —
-// 세션마다 아직 없는 난이도를 생성 요청할 수 있는 버튼을 둔다.
-// 세션이 아직 끝나지 않았으면(ended_at 미기록) 비어있는 게 정상 상태.
+// 풀타임 리포트 스킨 — Markdown 본문은 기존 강의노트 그대로.
 export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerProps) {
   const [pendingKey, setPendingKey] = useState<string | null>(null)
 
   if (notes.length === 0) {
     return (
       <div className="lecture-notes lecture-notes--empty">
-        아직 종료된 세션이 없습니다. 세션이 끝나면(Stop 훅 감지) 자동으로 강의노트가 생성됩니다.
+        경기가 끝나면(세션 종료) 풀타임 리포트가 자동으로 생성됩니다.
       </div>
     )
   }
@@ -54,13 +51,14 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
   const groups = groupBySession(notes)
 
   return (
-    <div className="lecture-notes">
+    <div className="lecture-notes lecture-notes--ft">
       {groups.map((group) => {
         const presentLevels = new Set(group.notes.map((note) => note.skill_level))
         return (
           <section key={group.sessionId} className="lecture-note-group">
             <div className="lecture-note-group__header">
-              <span className="lecture-note__session">session: {group.sessionId.slice(0, 8)}</span>
+              <span className="lecture-note__ft-badge">FT</span>
+              <span className="lecture-note__session">경기 {group.sessionId.slice(0, 8)}</span>
               <div className="lecture-note-group__regen">
                 {ALL_LEVELS.filter((level) => !presentLevels.has(level)).map((level) => {
                   const key = `${group.sessionId}:${level}`
@@ -71,6 +69,7 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
                       type="button"
                       className="lecture-note-group__regen-btn"
                       disabled={pending}
+                      title={`${SKILL_LABEL[level]} 해설 모드로 리포트 다시 받기`}
                       onClick={async () => {
                         setPendingKey(key)
                         try {
@@ -80,7 +79,7 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
                         }
                       }}
                     >
-                      {pending ? '생성 중…' : `${SKILL_LABEL[level]}로도 보기`}
+                      {pending ? '작성 중…' : `${SKILL_LABEL[level]} 리포트`}
                     </button>
                   )
                 })}
@@ -89,6 +88,7 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
             {group.notes.map((note) => (
               <article key={note.id} className="lecture-note">
                 <header className="lecture-note__header">
+                  <span className="lecture-note__ft-badge">FT</span>
                   <span className="lecture-note__skill">
                     {SKILL_LABEL[note.skill_level] ?? note.skill_level}
                   </span>

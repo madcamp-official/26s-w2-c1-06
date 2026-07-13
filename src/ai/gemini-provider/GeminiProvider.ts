@@ -28,7 +28,10 @@ interface RawCaption {
   eventId?: string
   versionId?: string
   stepId?: string
+  title?: string
   caption: string
+  why?: string
+  ttsScript?: string
   conceptTags: string[]
 }
 
@@ -68,7 +71,10 @@ export class GeminiProvider implements AIProvider {
       .filter((item) => item.stepId && knownIds.has(item.stepId))
       .map((item) => ({
         stepId: item.stepId!,
+        title: item.title?.trim() || '학습 스텝',
         caption: item.caption,
+        why: item.why?.trim() || '',
+        ttsScript: item.ttsScript?.trim() || item.caption,
         conceptTags: item.conceptTags ?? []
       }))
   }

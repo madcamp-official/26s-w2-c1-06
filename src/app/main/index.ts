@@ -12,15 +12,25 @@ import type {
   CodeUnitEdge,
   CodeUnitVersionWithUnit,
   LectureNote,
+  MatchStats,
   PipelineHandle,
   Prompt,
+  Session,
   SkillLevel,
-  ToolEvent
+  ToolEvent,
+  UnitMatchStat
 } from '@shared/types'
+import type { TtsSettings, TtsUtterance } from '@shared/tts'
 import { startPipeline } from '@pipeline/index'
 import { startCaptionWorker } from './caption-worker'
 import { startLectureNoteWorker } from './lecture-note-worker'
 import { createContextBundleLoader, createSessionTraceLoader } from './session-trace'
+import {
+  DEFAULT_TTS_VOICE,
+  EdgeTtsService,
+  TTS_MIME_TYPE,
+  type TtsVoiceId
+} from './tts/EdgeTtsService'
 
 loadEnv({ path: join(app.getAppPath(), '.env'), quiet: true })
 
@@ -36,7 +46,38 @@ const db = openDatabase(dbPath)
 applySchema(db, schemaPath)
 
 const aiProvider = createAIProvider()
-const stopCaptionWorker = startCaptionWorker(db, aiProvider)
+const ttsService = new EdgeTtsService()
+
+const getSettingStmt = db.prepare(`SELECT value FROM user_settings WHERE key = @key`)
+const setSettingStmt = db.prepare(`
+  INSERT INTO user_settings (key, value) VALUES (@key, @value)
+  ON CONFLICT(key) DO UPDATE SET value = excluded.value
+`)
+
+function readTtsEnabled(): boolean {
+  const row = getSettingStmt.get({ key: 'tts_enabled' }) as { value: string } | undefined
+  // 기본 on
+  return row?.value !== '0'
+}
+
+function readTtsVoice(): TtsVoiceId {
+  const row = getSettingStmt.get({ key: 'tts_voice' }) as { value: string } | undefined
+  if (row?.value === 'ko-KR-SunHiNeural') return 'ko-KR-SunHiNeural'
+  return DEFAULT_TTS_VOICE
+}
+
+function broadcastUtterance(utterance: TtsUtterance): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('tts:utterance', utterance)
+  }
+}
+
+const stopCaptionWorker = startCaptionWorker(db, aiProvider, {
+  tts: ttsService,
+  onUtterance: broadcastUtterance,
+  isTtsEnabled: readTtsEnabled,
+  getTtsVoice: readTtsVoice
+})
 const stopLectureNoteWorker = startLectureNoteWorker(db, aiProvider)
 const loadSessionTrace = createSessionTraceLoader(db)
 const loadContextBundle = createContextBundleLoader(db)
@@ -97,6 +138,49 @@ const getLatestSessionId = db.prepare(`
   SELECT id FROM sessions ORDER BY started_at DESC LIMIT 1
 `)
 
+const getLatestSessionStmt = db.prepare(`
+  SELECT * FROM sessions ORDER BY started_at DESC LIMIT 1
+`)
+
+const getMatchStatsStmt = db.prepare(`
+  SELECT
+    (SELECT COUNT(*) FROM tool_events WHERE session_id = @session_id AND status = 'success') AS success,
+    (SELECT COUNT(*) FROM tool_events WHERE session_id = @session_id AND status = 'error') AS error,
+    (SELECT COUNT(*) FROM tool_events WHERE session_id = @session_id AND status = 'pending') AS pending,
+    (
+      SELECT COUNT(*) FROM code_unit_versions v
+      LEFT JOIN tool_events te ON te.id = v.tool_event_id
+      LEFT JOIN prompts p ON p.id = v.prompt_id
+      WHERE v.change_type = 'created'
+        AND (te.session_id = @session_id OR p.session_id = @session_id)
+    ) AS created
+`)
+
+const getCreatedToolEventIdsStmt = db.prepare(`
+  SELECT DISTINCT v.tool_event_id AS id
+  FROM code_unit_versions v
+  JOIN tool_events te ON te.id = v.tool_event_id
+  WHERE v.change_type = 'created'
+    AND te.session_id = @session_id
+    AND v.tool_event_id IS NOT NULL
+`)
+
+const getUnitMatchStatsStmt = db.prepare(`
+  SELECT
+    u.id AS unitId,
+    COUNT(v.id) AS versionCount,
+    (
+      SELECT v2.change_type FROM code_unit_versions v2
+      WHERE v2.unit_id = u.id
+      ORDER BY v2.version_no DESC LIMIT 1
+    ) AS latestChangeType,
+    u.last_seen_at AS lastSeenAt
+  FROM code_units u
+  LEFT JOIN code_unit_versions v ON v.unit_id = u.id
+  GROUP BY u.id
+  ORDER BY u.file_path ASC, u.unit_name ASC
+`)
+
 const getSkillLevelStmt = db.prepare(`
   SELECT value FROM user_settings WHERE key = 'skill_level'
 `)
@@ -112,8 +196,6 @@ const getExplanationsBySession = db.prepare(`
   WHERE ae.target_type = 'tool_event' AND te.session_id = @session_id AND ae.skill_level = @skill_level
 `)
 
-// 스텝 요약 캡션. target_id = 스텝 대표 assistant_notes.id라, assistant_notes에
-// 조인해 세션으로 필터한다(ai_explanations 자체엔 session_id가 없음).
 const getStepExplanationsBySession = db.prepare(`
   SELECT ae.* FROM ai_explanations ae
   JOIN assistant_notes an ON an.id = ae.target_id
@@ -186,10 +268,51 @@ const insertLectureNoteStmt = db.prepare(`
   VALUES (@id, @session_id, @markdown, @skill_level, @created_at)
 `)
 
+async function synthesizeUtterance(
+  id: string,
+  text: string,
+  priority: TtsUtterance['priority'],
+  source: TtsUtterance['source']
+): Promise<TtsUtterance | null> {
+  if (!readTtsEnabled() || !text.trim()) return null
+  try {
+    const buffer = await ttsService.synthesize(text, readTtsVoice())
+    return {
+      id,
+      mimeType: TTS_MIME_TYPE,
+      audioBase64: buffer.toString('base64'),
+      priority,
+      source
+    }
+  } catch (error) {
+    console.error('[tts] synthesize failed:', error)
+    return null
+  }
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle('db:getLatestSessionId', (): string | null => {
     const row = getLatestSessionId.get() as { id: string } | undefined
     return row?.id ?? null
+  })
+
+  ipcMain.handle('db:getLatestSession', (): Session | null => {
+    return (getLatestSessionStmt.get() as Session | undefined) ?? null
+  })
+
+  ipcMain.handle('db:getMatchStats', (_event, sessionId: string): MatchStats => {
+    const row = getMatchStatsStmt.get({ session_id: sessionId }) as MatchStats | undefined
+    return row ?? { success: 0, error: 0, pending: 0, created: 0 }
+  })
+
+  ipcMain.handle('db:getUnitMatchStats', (): UnitMatchStat[] => {
+    return getUnitMatchStatsStmt.all() as UnitMatchStat[]
+  })
+
+  ipcMain.handle('db:getCreatedToolEventIds', (_event, sessionId: string): string[] => {
+    return (getCreatedToolEventIdsStmt.all({ session_id: sessionId }) as { id: string }[]).map(
+      (row) => row.id
+    )
   })
 
   ipcMain.handle('db:getToolEvents', (_event, sessionId: string): ToolEvent[] => {
@@ -268,6 +391,34 @@ function registerIpcHandlers(): void {
     setOnboardingCompletedStmt.run()
   })
 
+  ipcMain.handle('tts:getSettings', (): TtsSettings => ({
+    enabled: readTtsEnabled(),
+    voice: readTtsVoice()
+  }))
+
+  ipcMain.handle('tts:setEnabled', (_event, enabled: boolean): void => {
+    setSettingStmt.run({ key: 'tts_enabled', value: enabled ? '1' : '0' })
+  })
+
+  ipcMain.handle('tts:setVoice', (_event, voice: TtsVoiceId): void => {
+    setSettingStmt.run({ key: 'tts_voice', value: voice })
+  })
+
+  ipcMain.handle(
+    'tts:speak',
+    async (
+      _event,
+      payload: { id: string; text: string; priority?: TtsUtterance['priority'] }
+    ): Promise<TtsUtterance | null> => {
+      return synthesizeUtterance(
+        payload.id,
+        payload.text,
+        payload.priority ?? 'high',
+        'version_override'
+      )
+    }
+  )
+
   // SPEC 5.1 항목별 오버라이드: 전역 skill_level을 바꾸지 않고 이 유닛 버전 하나만
   // 다른 난이도로 조회 — ai_explanations 캐시를 먼저 보고, 없으면 온디맨드 생성.
   ipcMain.handle(
@@ -278,7 +429,14 @@ function registerIpcHandlers(): void {
         target_id: versionId,
         skill_level: skillLevel
       }) as AiExplanation | undefined
-      if (cached) return cached
+      if (cached) {
+        void synthesizeUtterance(versionId, cached.content, 'high', 'version_override').then(
+          (utterance) => {
+            if (utterance) broadcastUtterance(utterance)
+          }
+        )
+        return cached
+      }
 
       const version = getVersionByIdStmt.get({ id: versionId }) as
         | CodeUnitVersionWithUnit
@@ -298,12 +456,17 @@ function registerIpcHandlers(): void {
         created_at: new Date().toISOString()
       }
       upsertExplanationStmt.run(row)
+
+      void synthesizeUtterance(versionId, caption.caption, 'high', 'version_override').then(
+        (utterance) => {
+          if (utterance) broadcastUtterance(utterance)
+        }
+      )
+
       return row
     }
   )
 
-  // SPEC 4.3.2 온디맨드 재생성: 세션당 자동 생성은 1회뿐이라, 다른 난이도로
-  // 다시 보고 싶을 때 뷰어에서 호출. 같은 (session, skill_level) 조합은 캐시.
   ipcMain.handle(
     'db:regenerateLectureNote',
     async (_event, sessionId: string, skillLevel: SkillLevel): Promise<LectureNote | null> => {
@@ -377,7 +540,8 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopCaptionWorker()
   stopLectureNoteWorker()
-  pipeline?.stop() // 파이프라인이 자기 DB 커넥션을 닫는다 — 우리 커넥션 close보다 먼저
+  ttsService.close()
+  pipeline?.stop()
   db.close()
   if (process.platform !== 'darwin') app.quit()
 })

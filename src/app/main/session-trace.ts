@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3'
-import type { ContextBundle, SessionTrace } from '@ai/types'
+import type { ContextBundle, SessionTrace, StepSummaryForNote } from '@ai/types'
 import type {
+  AiExplanation,
+  AssistantNote,
   CodeUnit,
   CodeUnitEdge,
   CodeUnitVersionWithUnit,
@@ -8,6 +10,8 @@ import type {
   Session,
   ToolEvent
 } from '@shared/types'
+import { parseConceptTags, parseStepExplanation } from '@shared/format'
+import { groupIntoSteps } from '@shared/steps'
 
 // lecture-note-worker(자동 합성)와 온디맨드 재생성 IPC가 동일한 조회 로직을 쓰도록
 // 공유한다 — 강의노트에 실제로 반영되는 범위가 두 경로에서 어긋나지 않게 하기 위함.
@@ -24,6 +28,17 @@ export function createSessionTraceLoader(
     SELECT * FROM tool_events WHERE session_id = @session_id ORDER BY created_at ASC
   `)
 
+  const getNotes = db.prepare(`
+    SELECT * FROM assistant_notes WHERE session_id = @session_id ORDER BY created_at ASC, rowid ASC
+  `)
+
+  const getStepExplanations = db.prepare(`
+    SELECT ae.*
+    FROM ai_explanations ae
+    JOIN assistant_notes an ON an.id = ae.target_id
+    WHERE ae.target_type = 'step' AND an.session_id = @session_id
+  `)
+
   const getVersions = db.prepare(`
     SELECT DISTINCT v.*, u.unit_name, u.unit_type, u.file_path
     FROM code_unit_versions v
@@ -38,11 +53,40 @@ export function createSessionTraceLoader(
     const session = getSession.get({ session_id: sessionId }) as Session | undefined
     if (!session) return null
 
+    const notes = getNotes.all({ session_id: sessionId }) as AssistantNote[]
+    const events = getToolEvents.all({ session_id: sessionId }) as ToolEvent[]
+    const explanations = getStepExplanations.all({ session_id: sessionId }) as AiExplanation[]
+    const byId = new Map(explanations.map((e) => [e.target_id, e]))
+
+    const steps: StepSummaryForNote[] = groupIntoSteps(notes, events)
+      .filter((step) => step.id !== null && step.events.length > 0)
+      .map((step) => {
+        const explanation = byId.get(step.id!)
+        if (explanation) {
+          const parsed = parseStepExplanation(explanation.content)
+          return {
+            title: parsed.title,
+            body: parsed.body,
+            why: parsed.why,
+            conceptTags: parseConceptTags(explanation.concept_tags)
+          }
+        }
+        // 캡션 없으면 note 앞부분으로 최소 서사라도 넣는다.
+        return {
+          title: '',
+          body: step.note?.text?.slice(0, 200) ?? '',
+          why: '',
+          conceptTags: []
+        }
+      })
+      .filter((step) => step.body.length > 0)
+
     return {
       session,
       prompts: getPrompts.all({ session_id: sessionId }) as Prompt[],
-      toolEvents: getToolEvents.all({ session_id: sessionId }) as ToolEvent[],
-      versions: getVersions.all({ session_id: sessionId }) as CodeUnitVersionWithUnit[]
+      toolEvents: events,
+      versions: getVersions.all({ session_id: sessionId }) as CodeUnitVersionWithUnit[],
+      steps
     }
   }
 }

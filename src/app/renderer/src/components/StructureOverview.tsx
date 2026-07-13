@@ -1,72 +1,97 @@
 import { useMemo } from 'react'
-import { Background, Controls, ReactFlow, type Edge, type Node } from '@xyflow/react'
+import {
+  Background,
+  Controls,
+  ReactFlow,
+  type Edge,
+  type Node,
+  type NodeTypes
+} from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { CodeUnit, CodeUnitEdge, UnitType } from '@shared/types'
+import type { CodeUnit, CodeUnitEdge, UnitMatchStat } from '@shared/types'
+import { PlayerUnitNode, type PlayerUnitNodeData } from './PlayerUnitNode'
 
 interface StructureOverviewProps {
   units: CodeUnit[]
   edges: CodeUnitEdge[]
   selectedUnitId: string | null
   onSelectUnit: (unitId: string) => void
+  unitStats?: Map<string, UnitMatchStat>
 }
 
-const UNIT_TYPE_COLOR: Record<UnitType, string> = {
-  component: '#61dafb',
-  hook: '#c586c0',
-  function: '#dcdcaa',
-  class: '#4ec9b0'
+const LAYER_WIDTH = 220
+const ROW_HEIGHT = 90
+const RECENT_MS = 5 * 60_000
+
+const nodeTypes: NodeTypes = {
+  player: PlayerUnitNode
 }
 
-const LAYER_WIDTH = 200
-const ROW_HEIGHT = 70
-
-// SPEC 4.5 구조도 오버뷰: code_units를 노드, code_unit_edges를 엣지로 렌더.
-// 노드 클릭 시 유닛 타임라인으로 drill-down (Level 1 → Level 3, SPEC 5장).
-// 별도 레이아웃 라이브러리 없이, 엣지 방향 기준 BFS로 왼쪽→오른쪽 레이어를 계산한다.
-export function StructureOverview({ units, edges, selectedUnitId, onSelectUnit }: StructureOverviewProps) {
+// SPEC 4.5 구조도 = FM 전술판. 커스텀 선수 카드 노드 + 선택 유닛 패스 강조.
+export function StructureOverview({
+  units,
+  edges,
+  selectedUnitId,
+  onSelectUnit,
+  unitStats
+}: StructureOverviewProps) {
   const { nodes, flowEdges } = useMemo(() => {
     const positions = computeLayeredPositions(units, edges)
+    const now = Date.now()
 
-    const nodes: Node[] = units.map((unit) => ({
-      id: unit.id,
-      position: positions[unit.id] ?? { x: 0, y: 0 },
-      data: { label: `${unit.unit_name}\n${unit.unit_type}` },
-      style: {
-        border: unit.id === selectedUnitId ? '2px solid #58a6ff' : '1px solid #8888',
-        borderLeft: `4px solid ${UNIT_TYPE_COLOR[unit.unit_type] ?? '#888888'}`,
-        borderRadius: 6,
-        padding: '6px 10px',
-        fontSize: 12,
-        whiteSpace: 'pre-line',
-        cursor: 'pointer'
+    const nodes: Node<PlayerUnitNodeData>[] = units.map((unit) => {
+      const stat = unitStats?.get(unit.id)
+      const lastSeen = unit.last_seen_at ? Date.parse(unit.last_seen_at) : 0
+      const recent = Number.isFinite(lastSeen) && now - lastSeen < RECENT_MS
+
+      return {
+        id: unit.id,
+        type: 'player',
+        position: positions[unit.id] ?? { x: 0, y: 0 },
+        data: {
+          name: unit.unit_name,
+          unitType: unit.unit_type,
+          versionCount: stat?.versionCount ?? 0,
+          latestChangeType: stat?.latestChangeType ?? null,
+          selected: unit.id === selectedUnitId,
+          recent
+        }
       }
-    }))
+    })
 
-    return { nodes, flowEdges: mergeParallelEdges(edges) }
-  }, [units, edges, selectedUnitId])
+    return {
+      nodes,
+      flowEdges: mergeParallelEdges(edges, selectedUnitId)
+    }
+  }, [units, edges, selectedUnitId, unitStats])
 
   if (units.length === 0) {
-    return <div className="structure-overview structure-overview--empty">추적된 코드 유닛이 없습니다.</div>
+    return (
+      <div className="structure-overview structure-overview--empty">
+        전술판에 올라온 선수가 없습니다.
+      </div>
+    )
   }
 
   return (
-    <div className="structure-overview">
+    <div className="structure-overview structure-overview--pitch">
       <ReactFlow
         nodes={nodes}
         edges={flowEdges}
+        nodeTypes={nodeTypes}
         onNodeClick={(_event, node) => onSelectUnit(node.id)}
         fitView
         colorMode="system"
         proOptions={{ hideAttribution: true }}
       >
-        <Background />
+        <Background gap={18} size={1} />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>
   )
 }
 
-function mergeParallelEdges(edges: CodeUnitEdge[]): Edge[] {
+function mergeParallelEdges(edges: CodeUnitEdge[], selectedUnitId: string | null): Edge[] {
   const merged = new Map<string, { source: string; target: string; types: Set<string> }>()
 
   for (const edge of edges) {
@@ -80,12 +105,22 @@ function mergeParallelEdges(edges: CodeUnitEdge[]): Edge[] {
     merged.set(key, entry)
   }
 
-  return Array.from(merged.entries()).map(([key, entry]) => ({
-    id: key,
-    source: entry.source,
-    target: entry.target,
-    label: Array.from(entry.types).join(', ')
-  }))
+  return Array.from(merged.entries()).map(([key, entry]) => {
+    const linked =
+      selectedUnitId != null &&
+      (entry.source === selectedUnitId || entry.target === selectedUnitId)
+    return {
+      id: key,
+      source: entry.source,
+      target: entry.target,
+      label: Array.from(entry.types).join(', '),
+      animated: linked,
+      style: linked
+        ? { stroke: '#58a6ff', strokeWidth: 2 }
+        : { stroke: '#8886', strokeWidth: 1 },
+      labelStyle: { fontSize: 10, fill: '#888' }
+    }
+  })
 }
 
 function computeLayeredPositions(
@@ -97,7 +132,7 @@ function computeLayeredPositions(
   units.forEach((unit) => incomingCount.set(unit.id, 0))
 
   for (const edge of edges) {
-    if (!incomingCount.has(edge.from_unit_id) || !incomingCount.has(edge.to_unit_id)) continue // 알 수 없는 유닛 참조 스킵
+    if (!incomingCount.has(edge.from_unit_id) || !incomingCount.has(edge.to_unit_id)) continue
     outgoing.set(edge.from_unit_id, [...(outgoing.get(edge.from_unit_id) ?? []), edge.to_unit_id])
     incomingCount.set(edge.to_unit_id, (incomingCount.get(edge.to_unit_id) ?? 0) + 1)
   }
@@ -118,7 +153,7 @@ function computeLayeredPositions(
   }
 
   units.forEach((unit) => {
-    if (!layer.has(unit.id)) layer.set(unit.id, 0) // 순환/고아 노드는 레이어 0으로 대체
+    if (!layer.has(unit.id)) layer.set(unit.id, 0)
   })
 
   const rowsUsedPerLayer = new Map<number, number>()

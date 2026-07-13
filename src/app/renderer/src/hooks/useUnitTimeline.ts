@@ -4,25 +4,26 @@ import type {
   CodeUnit,
   CodeUnitEdge,
   CodeUnitVersionWithUnit,
-  SkillLevel
+  SkillLevel,
+  UnitMatchStat
 } from '@shared/types'
 
-const POLL_INTERVAL_MS = 2000 // 트레이스보다 갱신 빈도가 낮아도 되는 데이터
+const POLL_INTERVAL_MS = 2000
 
 interface UseUnitTimelineResult {
   units: CodeUnit[]
   edges: CodeUnitEdge[]
+  unitStats: Map<string, UnitMatchStat>
   selectedUnitId: string | null
   selectUnit: (unitId: string) => void
   versions: CodeUnitVersionWithUnit[]
   explanations: Map<string, AiExplanation>
 }
 
-// SPEC 4.5 "구조도 오버뷰" + "코드 유닛 타임라인": 유닛/엣지(구조) + 선택된
-// 유닛의 버전 체인과 그 버전들의 Level 3 해설(ai_explanations)을 함께 폴링한다.
 export function useUnitTimeline(skillLevel: SkillLevel): UseUnitTimelineResult {
   const [units, setUnits] = useState<CodeUnit[]>([])
   const [edges, setEdges] = useState<CodeUnitEdge[]>([])
+  const [unitStats, setUnitStats] = useState<Map<string, UnitMatchStat>>(new Map())
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null)
   const [versions, setVersions] = useState<CodeUnitVersionWithUnit[]>([])
   const [explanations, setExplanations] = useState<Map<string, AiExplanation>>(new Map())
@@ -31,14 +32,15 @@ export function useUnitTimeline(skillLevel: SkillLevel): UseUnitTimelineResult {
     let cancelled = false
 
     const fetchStructure = async (): Promise<void> => {
-      const [unitRows, edgeRows] = await Promise.all([
+      const [unitRows, edgeRows, statsRows] = await Promise.all([
         window.factcoding.getCodeUnits(),
-        window.factcoding.getCodeUnitEdges()
+        window.factcoding.getCodeUnitEdges(),
+        window.factcoding.getUnitMatchStats()
       ])
       if (cancelled) return
       setUnits(unitRows)
       setEdges(edgeRows)
-      // 최초 로드 시 첫 유닛 자동 선택 (빈 화면 방지)
+      setUnitStats(new Map(statsRows.map((row) => [row.unitId, row])))
       setSelectedUnitId((current) => current ?? unitRows[0]?.id ?? null)
     }
 
@@ -75,5 +77,13 @@ export function useUnitTimeline(skillLevel: SkillLevel): UseUnitTimelineResult {
     }
   }, [selectedUnitId, skillLevel])
 
-  return { units, edges, selectedUnitId, selectUnit: setSelectedUnitId, versions, explanations }
+  return {
+    units,
+    edges,
+    unitStats,
+    selectedUnitId,
+    selectUnit: setSelectedUnitId,
+    versions,
+    explanations
+  }
 }

@@ -5,6 +5,15 @@ import type { Session, SkillLevel } from '@shared/types'
 import { createSessionTraceLoader } from './session-trace'
 
 const POLL_INTERVAL_MS = 3000
+const GEMINI_BACKOFF_MS = 60_000
+
+function isRateLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const status = (error as { status?: number }).status
+  if (status === 429) return true
+  const message = String((error as { message?: string }).message ?? error)
+  return message.includes('429') || message.includes('RESOURCE_EXHAUSTED') || message.includes('quota')
+}
 
 // SPEC 4.3.2: Stop 훅 → 파이프라인이 sessions.ended_at 기록 → 여기서 그 전이를
 // 감지해 강의노트를 합성한다. "아직 노트가 없는, 이미 종료된 세션"을 찾는
@@ -31,18 +40,20 @@ export function startLectureNoteWorker(db: Database.Database, aiProvider: AIProv
   `)
 
   let running = false
+  let geminiCooldownUntil = 0
 
   const tick = async (): Promise<void> => {
     if (running) return
     running = true
     try {
+      if (Date.now() < geminiCooldownUntil) return
+
       const endedSessions = getEndedSessionsWithoutNotes.all() as Session[]
       if (endedSessions.length === 0) return
 
       const skillLevel = ((getSkillLevel.get() as { value: string } | undefined)?.value ??
         'intermediate') as SkillLevel
 
-      // 세션당 큰 컨텍스트 하나를 통째로 던지는 무거운 호출이므로, 틱당 1개만 처리
       const session = endedSessions[0]
       const trace = loadSessionTrace(session.id)
       if (!trace) return
@@ -58,6 +69,12 @@ export function startLectureNoteWorker(db: Database.Database, aiProvider: AIProv
       })
     } catch (error) {
       console.error('[lecture-note-worker] failed to synthesize lecture note:', error)
+      if (isRateLimitError(error)) {
+        geminiCooldownUntil = Date.now() + GEMINI_BACKOFF_MS
+        console.warn(
+          `[lecture-note-worker] Gemini rate-limited — backing off ${GEMINI_BACKOFF_MS / 1000}s`
+        )
+      }
     } finally {
       running = false
     }

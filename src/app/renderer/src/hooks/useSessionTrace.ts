@@ -1,10 +1,21 @@
 import { useEffect, useState } from 'react'
-import type { AiExplanation, AssistantNote, Prompt, SkillLevel, ToolEvent } from '@shared/types'
+import type {
+  AiExplanation,
+  AssistantNote,
+  MatchStats,
+  Prompt,
+  Session,
+  SkillLevel,
+  ToolEvent
+} from '@shared/types'
 
-const POLL_INTERVAL_MS = 1000 // SPEC 4.6: 통합 전까지는 폴링, 이후 IPC push로 대체
+const POLL_INTERVAL_MS = 1000
 
 interface UseSessionTraceResult {
   sessionId: string | null
+  session: Session | null
+  matchStats: MatchStats
+  createdEventIds: Set<string>
   prompts: Prompt[]
   events: ToolEvent[]
   notes: AssistantNote[]
@@ -13,8 +24,13 @@ interface UseSessionTraceResult {
   loading: boolean
 }
 
+const EMPTY_STATS: MatchStats = { success: 0, error: 0, pending: 0, created: 0 }
+
 export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [session, setSession] = useState<Session | null>(null)
+  const [matchStats, setMatchStats] = useState<MatchStats>(EMPTY_STATS)
+  const [createdEventIds, setCreatedEventIds] = useState<Set<string>>(new Set())
   const [prompts, setPrompts] = useState<Prompt[]>([])
   const [events, setEvents] = useState<ToolEvent[]>([])
   const [notes, setNotes] = useState<AssistantNote[]>([])
@@ -25,10 +41,11 @@ export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
   useEffect(() => {
     let cancelled = false
 
-    window.factcoding.getLatestSessionId().then((id) => {
+    window.factcoding.getLatestSession().then((row) => {
       if (cancelled) return
-      setSessionId(id)
-      if (id === null) setLoading(false) // 세션 자체가 없으면 여기서 로딩 종료 (무한 스피너 방지)
+      setSession(row)
+      setSessionId(row?.id ?? null)
+      if (row === null) setLoading(false)
     })
 
     return () => {
@@ -42,14 +59,22 @@ export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
     let cancelled = false
 
     const fetchTrace = async (): Promise<void> => {
-      const [promptRows, eventRows, noteRows, explanationRows, stepExplanationRows] = await Promise.all([
-        window.factcoding.getPrompts(sessionId),
-        window.factcoding.getToolEvents(sessionId),
-        window.factcoding.getAssistantNotes(sessionId),
-        window.factcoding.getExplanations(sessionId, skillLevel),
-        window.factcoding.getStepExplanations(sessionId, skillLevel)
-      ])
+      const [sessionRow, stats, createdIds, promptRows, eventRows, noteRows, explanationRows, stepExplanationRows] =
+        await Promise.all([
+          window.factcoding.getLatestSession(),
+          window.factcoding.getMatchStats(sessionId),
+          window.factcoding.getCreatedToolEventIds(sessionId),
+          window.factcoding.getPrompts(sessionId),
+          window.factcoding.getToolEvents(sessionId),
+          window.factcoding.getAssistantNotes(sessionId),
+          window.factcoding.getExplanations(sessionId, skillLevel),
+          window.factcoding.getStepExplanations(sessionId, skillLevel)
+        ])
       if (!cancelled) {
+        setSession(sessionRow)
+        if (sessionRow && sessionRow.id !== sessionId) setSessionId(sessionRow.id)
+        setMatchStats(stats)
+        setCreatedEventIds(new Set(createdIds))
         setPrompts(promptRows)
         setEvents(eventRows)
         setNotes(noteRows)
@@ -68,5 +93,16 @@ export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
     }
   }, [sessionId, skillLevel])
 
-  return { sessionId, prompts, events, notes, explanations, stepExplanations, loading }
+  return {
+    sessionId,
+    session,
+    matchStats,
+    createdEventIds,
+    prompts,
+    events,
+    notes,
+    explanations,
+    stepExplanations,
+    loading
+  }
 }

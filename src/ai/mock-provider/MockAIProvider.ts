@@ -21,6 +21,23 @@ const CHANGE_LABEL: Record<string, string> = {
   deleted: '삭제됐어요'
 }
 
+function truncateTitle(text: string): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim()
+  return oneLine.length > 16 ? oneLine.slice(0, 16) + '…' : oneLine
+}
+
+function conceptTagsFromEvents(events: ToolEvent[]): string[] {
+  const tags = new Set<string>()
+  for (const event of events) {
+    if (event.tool_name === 'Bash') tags.add('셸 명령')
+    else if (event.tool_name === 'Read') tags.add('코드 읽기')
+    else if (event.tool_name === 'Edit' || event.tool_name === 'Write') tags.add('코드 수정')
+    else tags.add(event.tool_name)
+    if (tags.size >= 3) break
+  }
+  return [...tags]
+}
+
 // GEMINI_KEY_A/B가 없을 때 배칭 → 캐시 → UI 파이프라인을 네트워크 호출 없이
 // 검증하기 위한 결정론적 mock. 실제 키가 생기면 createAIProvider가 자동으로
 // GeminiProvider로 교체하므로 이 파일은 그대로 둬도 된다.
@@ -51,14 +68,20 @@ export class MockAIProvider implements AIProvider {
 
     // 실제 Gemini 없이도 스텝 그룹핑 → 요약 → 캐시 → UI 경로를 검증하기 위한 결정론적 mock.
     return steps.map((step) => {
-      const tools = [...new Set(step.events.map((e) => e.tool_name))].join(', ') || '없음'
       const failed = step.events.filter((e) => e.status === 'error').length
-      const failNote = failed > 0 ? ` (실패 ${failed}건 포함)` : ''
+      const failNote = failed > 0 ? ` 실패 ${failed}건을 확인하고 다시 시도했어요.` : ''
+      const firstFile = step.events.find((e) => e.file_path)?.file_path
       return {
         stepId: step.stepId,
+        title: truncateTitle(step.noteText) || '작업 진행',
         caption:
-          `${TONE_PREFIX[skillLevel]} "${step.noteText.slice(0, 40)}" 의도로 ${step.events.length}개 액션(${tools})을 수행했어요${failNote}.`.trim(),
-        conceptTags: [...new Set(step.events.map((e) => e.tool_name))].slice(0, 3)
+          `${TONE_PREFIX[skillLevel]} "${step.noteText.slice(0, 40)}" 목표로 ${step.events.length}개 행동을 묶어 진행했어요.${failNote}`.trim(),
+        why: firstFile
+          ? `${firstFile}을(를) 보면 이 목표가 코드에 어떻게 반영되는지 확인할 수 있어요.`
+          : '이 행동들이 목표를 달성하는 데 필요한 증거예요.',
+        ttsScript:
+          `${TONE_PREFIX[skillLevel]} 지금 에이전트가 ${step.events.length}개 행동을 묶어 목표를 밀어붙이고 있습니다${failNote} 흐름을 잘 지켜보세요`.trim(),
+        conceptTags: conceptTagsFromEvents(step.events)
       }
     })
   }
@@ -85,15 +108,25 @@ export class MockAIProvider implements AIProvider {
       .map((v) => `- **${v.unit_name}** (${v.unit_type}) — ${v.change_type} (v${v.version_no})`)
       .join('\n')
 
+    const stepList = trace.steps
+      .map((s) => `- **${s.title}**: ${s.body}${s.why ? ` (${s.why})` : ''}`)
+      .join('\n')
+
     return [
       `# 세션 강의노트 ${TONE_PREFIX[skillLevel]}`.trim(),
-      '## 다룬 개념',
+      '## 이번 세션에서 배운 것',
       turnList || '(기록된 턴 없음)',
-      '## 변경된 코드 유닛별 요약',
+      stepList ? `\n학습 스텝:\n${stepList}` : '',
+      '## 핵심 개념',
+      trace.steps.flatMap((s) => s.conceptTags).slice(0, 5).map((t) => `- ${t}`).join('\n') ||
+        '- (태그 없음)',
+      '## 코드에서 일어난 일',
       versionList || '(변경된 유닛 없음)',
-      '## 다음 학습 추천',
+      '## 다시 보면 좋은 포인트',
       `- 이번 세션에서 다룬 ${trace.versions.length}개 코드 유닛 변경을 복습해보세요.`
-    ].join('\n\n')
+    ]
+      .filter(Boolean)
+      .join('\n\n')
   }
 
   async answerQuestion(

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { QnaExchange } from '../hooks/useQna'
 
 interface QnaChatProps {
@@ -8,13 +8,31 @@ interface QnaChatProps {
   pending: boolean
   disabled: boolean
   onAsk: (question: string) => void
+  /** 개념 태그 클릭 등으로 입력칸에 미리 채울 질문 */
+  prefill?: string | null
+  onPrefillConsumed?: () => void
 }
 
 // SPEC 4.3.3 / 4.5 Q&A 챗 버튼: 헤더에서 여닫는 패널로 구현 — 트레이스/타임라인의
 // "임의 지점"별 배치 대신 세션 전체 컨텍스트(session-trace.ts의 ContextBundle)로
 // 단순화했다 (MVP 범위, 특정 항목에 질문을 고정하는 건 로드맵).
-export function QnaChat({ open, onToggle, exchanges, pending, disabled, onAsk }: QnaChatProps) {
+export function QnaChat({
+  open,
+  onToggle,
+  exchanges,
+  pending,
+  disabled,
+  onAsk,
+  prefill,
+  onPrefillConsumed
+}: QnaChatProps) {
   const [draft, setDraft] = useState('')
+
+  useEffect(() => {
+    if (!prefill) return
+    setDraft(prefill)
+    onPrefillConsumed?.()
+  }, [prefill, onPrefillConsumed])
 
   const submit = (): void => {
     if (!draft.trim() || pending) return
