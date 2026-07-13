@@ -1,8 +1,8 @@
 import { EventEmitter } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { getClaudeProjectDir, findLatestSessionFile } from './observation/session-locator.js';
 import { tailFile, type FileTailer } from './observation/jsonl-tail.js';
-import { parseTranscriptLine } from './observation/transcript-parser.js';
+import { parseTranscriptLine, extractResultText } from './observation/transcript-parser.js';
 import { SnapshotCache } from './observation/snapshot-cache.js';
 import { PlanTracker } from './observation/plan-extractor.js';
 import { installHooks } from './observation/hook-installer.js';
@@ -243,7 +243,8 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
 
         const status = event.isError ? 'error' : 'success';
         const durationMs = Math.max(0, Date.parse(event.timestamp) - Date.parse(row.created_at));
-        repo.updateToolEventResult(event.toolUseId, status, durationMs);
+        const resultContent = extractResultText(event.content);
+        repo.updateToolEventResult(event.toolUseId, status, durationMs, resultContent);
 
         if (status !== 'success') break;
         if (row.tool_name !== 'Edit' && row.tool_name !== 'Write') break;
@@ -278,11 +279,22 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
       }
 
       case 'assistant_text': {
-        const text = planTracker.considerAssistantText(event.sessionId, event.text);
-        if (text !== null) {
-          const promptId = currentPromptIdBySession.get(event.sessionId);
-          if (promptId) repo.updatePromptPlanText(promptId, text);
-        }
+        const promptId = currentPromptIdBySession.get(event.sessionId) ?? null;
+
+        const planCandidate = planTracker.considerAssistantText(event.sessionId, event.text);
+        if (planCandidate !== null && promptId) repo.updatePromptPlanText(promptId, planCandidate);
+
+        // 턴의 첫 텍스트만 남기는 plan_text 폴백과 달리, 서사 표시용으로는
+        // 텍스트 조각 전부를 보존한다. 같은 timestamp에 여러 text 블록이 나올 수
+        // 있어(transcript-parser.ts) 텍스트 해시를 id에 섞어 충돌을 피한다.
+        const noteHash = createHash('sha1').update(event.text).digest('hex').slice(0, 12);
+        repo.insertAssistantNote({
+          id: `${event.sessionId}:${event.timestamp}:${noteHash}`,
+          sessionId: event.sessionId,
+          promptId,
+          text: event.text,
+          createdAt: event.timestamp,
+        });
         break;
       }
 
@@ -377,7 +389,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
         rawPayload: JSON.stringify({ before, after }),
         createdAt: timestamp,
       });
-      repo.updateToolEventResult(toolEventId, 'success', 0);
+      repo.updateToolEventResult(toolEventId, 'success', 0, null);
       scheduleAstDiff(filePath, before, toolEventId, null, timestamp);
     },
     (err) => emitter.emit('error', err)

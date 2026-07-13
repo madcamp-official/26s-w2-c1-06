@@ -1,5 +1,13 @@
-import type { CodeUnitVersionWithUnit, SkillLevel, ToolEvent } from '@shared/types'
-import type { AIProvider, BatchCaption, ContextBundle, SessionTrace, VersionCaption } from '../types'
+import type { AssistantNote, CodeUnitVersionWithUnit, SkillLevel, ToolEvent } from '@shared/types'
+import type {
+  AIProvider,
+  BatchCaption,
+  ContextBundle,
+  SessionTrace,
+  StepCaption,
+  StepInput,
+  VersionCaption
+} from '../types'
 
 const TONE_PREFIX: Record<SkillLevel, string> = {
   beginner: '(쉽게 설명하면)',
@@ -17,14 +25,42 @@ const CHANGE_LABEL: Record<string, string> = {
 // 검증하기 위한 결정론적 mock. 실제 키가 생기면 createAIProvider가 자동으로
 // GeminiProvider로 교체하므로 이 파일은 그대로 둬도 된다.
 export class MockAIProvider implements AIProvider {
-  async explainBatch(events: ToolEvent[], skillLevel: SkillLevel): Promise<BatchCaption[]> {
+  async explainBatch(events: ToolEvent[], _notes: AssistantNote[], skillLevel: SkillLevel): Promise<BatchCaption[]> {
     await new Promise((resolve) => setTimeout(resolve, 300))
 
-    return events.map((event) => ({
-      toolEventId: event.id,
-      caption: `${TONE_PREFIX[skillLevel]} ${event.tool_name}(으)로 ${event.file_path ?? '작업'}을(를) 처리했어요.`.trim(),
-      conceptTags: [event.tool_name]
-    }))
+    // 실제 Gemini 없이도 1~3단계 데이터(특히 실패 근거)가 화면까지 이어지는지 확인할 수
+    // 있도록, 결정론적이지만 error 상태는 result_content를 반영해 구분되게 만든다.
+    return events.map((event) => {
+      if (event.status === 'error' && event.result_content) {
+        return {
+          toolEventId: event.id,
+          caption: `${TONE_PREFIX[skillLevel]} ${event.tool_name} 실행이 실패했어요: ${event.result_content.slice(0, 80)}`.trim(),
+          conceptTags: [event.tool_name, '에러 처리']
+        }
+      }
+      return {
+        toolEventId: event.id,
+        caption: `${TONE_PREFIX[skillLevel]} ${event.tool_name}(으)로 ${event.file_path ?? '작업'}을(를) 처리했어요.`.trim(),
+        conceptTags: [event.tool_name]
+      }
+    })
+  }
+
+  async explainSteps(steps: StepInput[], skillLevel: SkillLevel): Promise<StepCaption[]> {
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    // 실제 Gemini 없이도 스텝 그룹핑 → 요약 → 캐시 → UI 경로를 검증하기 위한 결정론적 mock.
+    return steps.map((step) => {
+      const tools = [...new Set(step.events.map((e) => e.tool_name))].join(', ') || '없음'
+      const failed = step.events.filter((e) => e.status === 'error').length
+      const failNote = failed > 0 ? ` (실패 ${failed}건 포함)` : ''
+      return {
+        stepId: step.stepId,
+        caption:
+          `${TONE_PREFIX[skillLevel]} "${step.noteText.slice(0, 40)}" 의도로 ${step.events.length}개 액션(${tools})을 수행했어요${failNote}.`.trim(),
+        conceptTags: [...new Set(step.events.map((e) => e.tool_name))].slice(0, 3)
+      }
+    })
   }
 
   async explainUnitVersions(

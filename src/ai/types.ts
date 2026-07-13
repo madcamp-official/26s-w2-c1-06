@@ -1,4 +1,5 @@
 import type {
+  AssistantNote,
   CodeUnit,
   CodeUnitEdge,
   CodeUnitVersionWithUnit,
@@ -16,6 +17,19 @@ export interface BatchCaption {
 
 export interface VersionCaption {
   versionId: string
+  caption: string
+  conceptTags: string[]
+}
+
+// 학습 파이프라인 4단계: 스텝(에이전트 의도 1개 + 그 안 액션들) 단위 요약.
+export interface StepInput {
+  stepId: string
+  noteText: string
+  events: ToolEvent[]
+}
+
+export interface StepCaption {
+  stepId: string
   caption: string
   conceptTags: string[]
 }
@@ -39,7 +53,8 @@ export interface ContextBundle {
 // SPEC 4.3의 AIProvider: 실시간 해설(4.3.1)·코드 유닛 변경 요약(Level 3)·
 // 강의노트 합성(4.3.2)·Q&A 챗(4.3.3).
 export interface AIProvider {
-  explainBatch(events: ToolEvent[], skillLevel: SkillLevel): Promise<BatchCaption[]>
+  explainBatch(events: ToolEvent[], notes: AssistantNote[], skillLevel: SkillLevel): Promise<BatchCaption[]>
+  explainSteps(steps: StepInput[], skillLevel: SkillLevel): Promise<StepCaption[]>
   explainUnitVersions(
     versions: CodeUnitVersionWithUnit[],
     skillLevel: SkillLevel

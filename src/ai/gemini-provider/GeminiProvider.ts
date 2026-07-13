@@ -1,9 +1,18 @@
 import { GoogleGenAI, type Schema } from '@google/genai'
-import type { CodeUnitVersionWithUnit, SkillLevel, ToolEvent } from '@shared/types'
-import type { AIProvider, BatchCaption, ContextBundle, SessionTrace, VersionCaption } from '../types'
+import type { AssistantNote, CodeUnitVersionWithUnit, SkillLevel, ToolEvent } from '@shared/types'
+import type {
+  AIProvider,
+  BatchCaption,
+  ContextBundle,
+  SessionTrace,
+  StepCaption,
+  StepInput,
+  VersionCaption
+} from '../types'
 import type { GeminiKeyPool } from '../key-pool/GeminiKeyPool'
 import { buildAnswerQuestionPrompt } from '../prompt-templates/answerQuestionPrompt'
 import { buildExplainBatchPrompt, EXPLAIN_BATCH_RESPONSE_SCHEMA } from '../prompt-templates/explainBatchPrompt'
+import { buildExplainStepsPrompt, EXPLAIN_STEPS_RESPONSE_SCHEMA } from '../prompt-templates/explainStepPrompt'
 import {
   buildExplainVersionsPrompt,
   EXPLAIN_VERSIONS_RESPONSE_SCHEMA
@@ -18,6 +27,7 @@ const MODEL = 'gemini-flash-latest'
 interface RawCaption {
   eventId?: string
   versionId?: string
+  stepId?: string
   caption: string
   conceptTags: string[]
 }
@@ -27,11 +37,11 @@ export class GeminiProvider implements AIProvider {
 
   constructor(private readonly keyPool: GeminiKeyPool) {}
 
-  async explainBatch(events: ToolEvent[], skillLevel: SkillLevel): Promise<BatchCaption[]> {
+  async explainBatch(events: ToolEvent[], notes: AssistantNote[], skillLevel: SkillLevel): Promise<BatchCaption[]> {
     if (events.length === 0) return []
 
     const raw = await this.generateJson(
-      buildExplainBatchPrompt(events, skillLevel),
+      buildExplainBatchPrompt(events, notes, skillLevel),
       EXPLAIN_BATCH_RESPONSE_SCHEMA
     )
     const knownIds = new Set(events.map((event) => event.id))
@@ -40,6 +50,24 @@ export class GeminiProvider implements AIProvider {
       .filter((item) => item.eventId && knownIds.has(item.eventId))
       .map((item) => ({
         toolEventId: item.eventId!,
+        caption: item.caption,
+        conceptTags: item.conceptTags ?? []
+      }))
+  }
+
+  async explainSteps(steps: StepInput[], skillLevel: SkillLevel): Promise<StepCaption[]> {
+    if (steps.length === 0) return []
+
+    const raw = await this.generateJson(
+      buildExplainStepsPrompt(steps, skillLevel),
+      EXPLAIN_STEPS_RESPONSE_SCHEMA
+    )
+    const knownIds = new Set(steps.map((step) => step.stepId))
+
+    return raw
+      .filter((item) => item.stepId && knownIds.has(item.stepId))
+      .map((item) => ({
+        stepId: item.stepId!,
         caption: item.caption,
         conceptTags: item.conceptTags ?? []
       }))

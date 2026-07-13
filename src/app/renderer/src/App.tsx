@@ -16,7 +16,15 @@ import { useUnitTimeline } from './hooks/useUnitTimeline'
 
 function App() {
   const { skillLevel, setSkillLevel } = useSkillLevel()
-  const { sessionId, prompts, events, explanations, loading } = useSessionTrace(skillLevel)
+  const {
+    sessionId,
+    prompts,
+    events,
+    notes: assistantNotes,
+    explanations,
+    stepExplanations,
+    loading
+  } = useSessionTrace(skillLevel)
   const timeline = useUnitTimeline(skillLevel)
   const { notes, regenerate } = useLectureNotes()
   const { needsOnboarding, complete } = useOnboarding(setSkillLevel)
@@ -43,7 +51,14 @@ function App() {
       <main className="app__main app__main--split">
         <section className="app__pane">
           <h2 className="app__pane-title">실시간 트레이스</h2>
-          <TracePanel prompts={prompts} events={events} explanations={explanations} loading={loading} />
+          <TracePanel
+            prompts={prompts}
+            events={events}
+            notes={assistantNotes}
+            explanations={explanations}
+            stepExplanations={stepExplanations}
+            loading={loading}
+          />
         </section>
         <section className="app__pane">
           <h2 className="app__pane-title">구조도</h2>

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AiExplanation,
+  AssistantNote,
   CodeUnit,
   CodeUnitEdge,
   CodeUnitVersionWithUnit,
@@ -16,10 +17,14 @@ const factcodingApi = {
     ipcRenderer.invoke('db:getToolEvents', sessionId),
   getPrompts: (sessionId: string): Promise<Prompt[]> =>
     ipcRenderer.invoke('db:getPrompts', sessionId),
+  getAssistantNotes: (sessionId: string): Promise<AssistantNote[]> =>
+    ipcRenderer.invoke('db:getAssistantNotes', sessionId),
   getSkillLevel: (): Promise<SkillLevel> => ipcRenderer.invoke('db:getSkillLevel'),
   setSkillLevel: (level: SkillLevel): Promise<void> => ipcRenderer.invoke('db:setSkillLevel', level),
   getExplanations: (sessionId: string, skillLevel: SkillLevel): Promise<AiExplanation[]> =>
     ipcRenderer.invoke('db:getExplanations', sessionId, skillLevel),
+  getStepExplanations: (sessionId: string, skillLevel: SkillLevel): Promise<AiExplanation[]> =>
+    ipcRenderer.invoke('db:getStepExplanations', sessionId, skillLevel),
   getCodeUnits: (): Promise<CodeUnit[]> => ipcRenderer.invoke('db:getCodeUnits'),
   getUnitVersions: (unitId: string): Promise<CodeUnitVersionWithUnit[]> =>
     ipcRenderer.invoke('db:getUnitVersions', unitId),

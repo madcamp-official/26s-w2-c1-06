@@ -35,6 +35,18 @@ CREATE TABLE IF NOT EXISTS tool_events (
   status TEXT DEFAULT 'pending',  -- pending | success | error (tool_result 매칭 시 갱신)
   duration_ms INTEGER,      -- tool_use → tool_result 소요시간
   raw_payload TEXT,
+  result_content TEXT,      -- tool_result의 텍스트화된 내용(성공 출력/에러 메시지, truncate됨). AI 캡션이 "왜 실패했는지" 설명할 근거
+  created_at DATETIME
+);
+
+-- 에이전트의 assistant_text 조각 전부(턴당 1개만 살아남는 prompts.plan_text
+-- 폴백과 달리 전부 보존). tool_events와 같은 시간축 위에서 "왜 이 행동을
+-- 했는지"를 잇는 서사 텍스트로 트레이스 패널이 병합해 보여준다.
+CREATE TABLE IF NOT EXISTS assistant_notes (
+  id TEXT PRIMARY KEY,
+  session_id TEXT REFERENCES sessions(id),
+  prompt_id TEXT REFERENCES prompts(id),
+  text TEXT,
   created_at DATETIME
 );
 
@@ -99,5 +111,6 @@ CREATE TABLE IF NOT EXISTS user_settings (
 -- (트레이스 패널: 세션별 시간순 / 타임라인: 유닛별 버전 체인 / 구조도: 파일별 유닛)
 CREATE INDEX IF NOT EXISTS idx_tool_events_session_time ON tool_events(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_prompts_session_turn ON prompts(session_id, turn_index);
+CREATE INDEX IF NOT EXISTS idx_assistant_notes_session_time ON assistant_notes(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_versions_unit ON code_unit_versions(unit_id, version_no);
 CREATE INDEX IF NOT EXISTS idx_units_file ON code_units(file_path);

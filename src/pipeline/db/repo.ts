@@ -71,16 +71,42 @@ export class Repo {
       .run(params);
   }
 
-  updateToolEventResult(toolUseId: string, status: 'success' | 'error', durationMs: number): void {
+  updateToolEventResult(
+    toolUseId: string,
+    status: 'success' | 'error',
+    durationMs: number,
+    resultContent: string | null
+  ): void {
     this.db
-      .prepare(`UPDATE tool_events SET status = @status, duration_ms = @durationMs WHERE id = @toolUseId`)
-      .run({ toolUseId, status, durationMs });
+      .prepare(
+        `UPDATE tool_events SET status = @status, duration_ms = @durationMs, result_content = @resultContent WHERE id = @toolUseId`
+      )
+      .run({ toolUseId, status, durationMs, resultContent });
   }
 
   getToolEvent(toolUseId: string): { tool_name: string; file_path: string | null; raw_payload: string; created_at: string } | undefined {
     return this.db
       .prepare(`SELECT tool_name, file_path, raw_payload, created_at FROM tool_events WHERE id = ?`)
       .get(toolUseId) as never;
+  }
+
+  // --- assistant_notes --------------------------------------------------
+  // id는 호출부(pipeline/index.ts)가 `sessionId:timestamp:textHash`로 결정론적으로
+  // 구성해 전달한다 — jsonl-tail은 기본적으로 세션 파일을 처음부터 재생하므로
+  // (startAtEnd 기본 false), 재시작 시 같은 텍스트 조각이 중복 삽입되지 않게 한다.
+  insertAssistantNote(params: {
+    id: string;
+    sessionId: string;
+    promptId: string | null;
+    text: string;
+    createdAt: string;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO assistant_notes (id, session_id, prompt_id, text, created_at)
+         VALUES (@id, @sessionId, @promptId, @text, @createdAt)`
+      )
+      .run(params);
   }
 
   // --- code_units / code_unit_versions --------------------------------------

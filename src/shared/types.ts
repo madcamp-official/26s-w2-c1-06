@@ -6,7 +6,7 @@ export type ChangeType = 'created' | 'modified' | 'deleted'
 export type UnitType = 'function' | 'component' | 'hook' | 'class'
 export type EdgeType = 'imports' | 'calls' | 'renders'
 export type SkillLevel = 'beginner' | 'intermediate' | 'advanced'
-export type AiExplanationTargetType = 'tool_event' | 'code_unit_version' | 'qna'
+export type AiExplanationTargetType = 'tool_event' | 'code_unit_version' | 'qna' | 'step'
 
 export interface Session {
   id: string
@@ -34,6 +34,15 @@ export interface ToolEvent {
   status: ToolStatus
   duration_ms: number | null
   raw_payload: string | null
+  result_content: string | null
+  created_at: string | null
+}
+
+export interface AssistantNote {
+  id: string
+  session_id: string
+  prompt_id: string | null
+  text: string
   created_at: string | null
 }
 

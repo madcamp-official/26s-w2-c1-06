@@ -7,6 +7,7 @@ import { applySchema, openDatabase } from '@db/connection'
 import { createAIProvider } from '@ai/createAIProvider'
 import type {
   AiExplanation,
+  AssistantNote,
   CodeUnit,
   CodeUnitEdge,
   CodeUnitVersionWithUnit,
@@ -86,6 +87,12 @@ const getPromptsBySession = db.prepare(`
   ORDER BY turn_index ASC
 `)
 
+const getAssistantNotesBySession = db.prepare(`
+  SELECT * FROM assistant_notes
+  WHERE session_id = @session_id
+  ORDER BY created_at ASC, rowid ASC
+`)
+
 const getLatestSessionId = db.prepare(`
   SELECT id FROM sessions ORDER BY started_at DESC LIMIT 1
 `)
@@ -103,6 +110,14 @@ const getExplanationsBySession = db.prepare(`
   SELECT ae.* FROM ai_explanations ae
   JOIN tool_events te ON te.id = ae.target_id
   WHERE ae.target_type = 'tool_event' AND te.session_id = @session_id AND ae.skill_level = @skill_level
+`)
+
+// 스텝 요약 캡션. target_id = 스텝 대표 assistant_notes.id라, assistant_notes에
+// 조인해 세션으로 필터한다(ai_explanations 자체엔 session_id가 없음).
+const getStepExplanationsBySession = db.prepare(`
+  SELECT ae.* FROM ai_explanations ae
+  JOIN assistant_notes an ON an.id = ae.target_id
+  WHERE ae.target_type = 'step' AND an.session_id = @session_id AND ae.skill_level = @skill_level
 `)
 
 const getCodeUnitsStmt = db.prepare(`
@@ -185,6 +200,10 @@ function registerIpcHandlers(): void {
     return getPromptsBySession.all({ session_id: sessionId }) as Prompt[]
   })
 
+  ipcMain.handle('db:getAssistantNotes', (_event, sessionId: string): AssistantNote[] => {
+    return getAssistantNotesBySession.all({ session_id: sessionId }) as AssistantNote[]
+  })
+
   ipcMain.handle('db:getSkillLevel', (): SkillLevel => {
     const row = getSkillLevelStmt.get() as { value: string } | undefined
     return (row?.value as SkillLevel | undefined) ?? 'intermediate'
@@ -198,6 +217,16 @@ function registerIpcHandlers(): void {
     'db:getExplanations',
     (_event, sessionId: string, skillLevel: SkillLevel): AiExplanation[] => {
       return getExplanationsBySession.all({
+        session_id: sessionId,
+        skill_level: skillLevel
+      }) as AiExplanation[]
+    }
+  )
+
+  ipcMain.handle(
+    'db:getStepExplanations',
+    (_event, sessionId: string, skillLevel: SkillLevel): AiExplanation[] => {
+      return getStepExplanationsBySession.all({
         session_id: sessionId,
         skill_level: skillLevel
       }) as AiExplanation[]
