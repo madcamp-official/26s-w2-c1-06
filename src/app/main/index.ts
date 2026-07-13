@@ -20,7 +20,7 @@ import type {
   ToolEvent,
   UnitMatchStat
 } from '@shared/types'
-import type { ProgressUpdate } from '@shared/progress'
+import type { ProgressState, ProgressUpdate } from '@shared/progress'
 import { startPipeline } from '@pipeline/index'
 import { startProgressWorker } from './progress-worker'
 import { startLectureNoteWorker } from './lecture-note-worker'
@@ -215,6 +215,18 @@ const getCachedExplanationStmt = db.prepare(`
   WHERE target_type = @target_type AND target_id = @target_id AND skill_level = @skill_level
 `)
 
+// progress-worker의 progress:update는 push라 렌더러가 아직 마운트되기 전에 끝난
+// 스텝은 유실될 수 있다(Electron IPC는 버퍼링 안 함) — 렌더러 마운트 시 이 조회로
+// "지금까지 쌓인 상태"를 한 번 당겨와 초기화한다(useProgress 참고).
+const PROGRESS_HISTORY_LIMIT = 6
+const getRecentStepProgressStmt = db.prepare(`
+  SELECT target_id, summary, key_code_snippet, key_code_lang, key_code_file, key_code_reason, step_percent
+  FROM ai_explanations
+  WHERE target_type = 'step' AND step_percent IS NOT NULL
+  ORDER BY created_at DESC
+  LIMIT ${PROGRESS_HISTORY_LIMIT}
+`)
+
 const upsertExplanationStmt = db.prepare(`
   INSERT INTO ai_explanations (
     id, target_type, target_id, skill_level, summary,
@@ -264,6 +276,34 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('db:getUnitMatchStats', (): UnitMatchStat[] => {
     return getUnitMatchStatsStmt.all() as UnitMatchStat[]
+  })
+
+  ipcMain.handle('db:getProgressState', (): ProgressState => {
+    const rows = getRecentStepProgressStmt.all() as {
+      target_id: string
+      summary: string
+      key_code_snippet: string | null
+      key_code_lang: string | null
+      key_code_file: string | null
+      key_code_reason: string | null
+      step_percent: number
+    }[]
+    return {
+      percent: rows[0]?.step_percent ?? 0,
+      history: rows.map((row) => ({
+        stepId: row.target_id,
+        summary: row.summary,
+        keyCode:
+          row.key_code_snippet && row.key_code_lang && row.key_code_file && row.key_code_reason
+            ? {
+                snippet: row.key_code_snippet,
+                lang: row.key_code_lang,
+                filePath: row.key_code_file,
+                reason: row.key_code_reason
+              }
+            : null
+      }))
+    }
   })
 
   ipcMain.handle('db:getCreatedToolEventIds', (_event, sessionId: string): string[] => {

@@ -26,11 +26,17 @@ export function useProgress(): UseProgressResult {
   const [history, setHistory] = useState<ProgressLogEntry[]>([])
   const [justCompleted, setJustCompleted] = useState(false)
   const lastAppliedPercentRef = useRef(0)
+  // progress:update는 push라 이 컴포넌트가 마운트되어 구독을 걸기 전에 끝난 스텝의
+  // 업데이트는 영영 유실된다(Electron IPC는 버퍼링 안 함) — 마운트 시
+  // db:getProgressState로 "지금까지 쌓인 상태"를 한 번 당겨와 보충한다. 이 플래그로
+  // 그 사이 실시간 업데이트가 먼저 도착했으면 캐치업 응답이 최신 값을 덮어쓰지 않게 한다.
+  const receivedLiveUpdateRef = useRef(false)
 
   useEffect(() => {
     let resetTimer: ReturnType<typeof setTimeout> | null = null
 
     const unsubscribe = window.factcoding.onProgressUpdate((update) => {
+      receivedLiveUpdateRef.current = true
       setHistory((prev) =>
         [
           { stepId: update.stepId, summary: update.summary, keyCode: update.keyCode, receivedAt: Date.now() },
@@ -55,6 +61,13 @@ export function useProgress(): UseProgressResult {
       setPercent(update.percent)
       setCycleId(update.cycleId)
       lastAppliedPercentRef.current = update.percent
+    })
+
+    window.factcoding.getProgressState().then((state) => {
+      if (receivedLiveUpdateRef.current) return
+      setPercent(state.percent)
+      setHistory(state.history.map((entry) => ({ ...entry, receivedAt: Date.now() })))
+      lastAppliedPercentRef.current = state.percent
     })
 
     return () => {

@@ -13,7 +13,7 @@ import type {
   ToolEvent,
   UnitMatchStat
 } from '@shared/types'
-import type { ProgressUpdate } from '@shared/progress'
+import type { ProgressState, ProgressUpdate } from '@shared/progress'
 
 const factcodingApi = {
   getLatestSessionId: (): Promise<string | null> => ipcRenderer.invoke('db:getLatestSessionId'),
@@ -21,6 +21,7 @@ const factcodingApi = {
   getMatchStats: (sessionId: string): Promise<MatchStats> =>
     ipcRenderer.invoke('db:getMatchStats', sessionId),
   getUnitMatchStats: (): Promise<UnitMatchStat[]> => ipcRenderer.invoke('db:getUnitMatchStats'),
+  getProgressState: (): Promise<ProgressState> => ipcRenderer.invoke('db:getProgressState'),
   getCreatedToolEventIds: (sessionId: string): Promise<string[]> =>
     ipcRenderer.invoke('db:getCreatedToolEventIds', sessionId),
   getToolEvents: (sessionId: string): Promise<ToolEvent[]> =>
