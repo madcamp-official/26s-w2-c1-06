@@ -111,24 +111,13 @@ body {
   border-radius: 4px;
 }
 
-.match-bar__status--live {
-  background: #d1242f;
+.match-bar__status--active {
+  background: #2ea043;
   color: #fff;
-  animation: match-live-pulse 1.4s ease-in-out infinite;
 }
 
-.match-bar__status--ft {
+.match-bar__status--ended {
   background: #8885;
-}
-
-@keyframes match-live-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.55;
-  }
 }
 
 .match-bar__minute {
@@ -398,10 +387,6 @@ body {
   border-radius: 4px;
 }
 
-.match-event__badge--play {
-  background: #8884;
-}
-
 .match-event__badge--new {
   background: #2ea04344;
   color: inherit;
@@ -427,7 +412,7 @@ body {
   border-left: 3px solid #d1242f;
 }
 
-.match-event--play {
+.match-event--default {
   border-left: 3px solid #8886;
 }
 
@@ -629,7 +614,7 @@ body {
   }
 }
 
-.player-card__pos {
+.player-card__type {
   font-size: 10px;
   font-weight: 700;
   opacity: 0.55;
@@ -678,15 +663,6 @@ body {
   height: 6px !important;
   background: #8888 !important;
   border: none !important;
-}
-
-.lecture-note__ft-badge {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: #8885;
 }
 
 .version-chain {

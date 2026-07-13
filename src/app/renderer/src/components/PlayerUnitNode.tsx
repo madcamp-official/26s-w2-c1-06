@@ -1,7 +1,6 @@
 import { memo } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { ChangeType, UnitType } from '@shared/types'
-import { unitTypeToPos } from '@shared/match'
 
 export interface PlayerUnitNodeData {
   name: string
@@ -21,7 +20,6 @@ const CHANGE_SHORT: Record<string, string> = {
 
 function PlayerUnitNodeComponent({ data }: NodeProps) {
   const d = data as PlayerUnitNodeData
-  const pos = unitTypeToPos(d.unitType)
 
   return (
     <div
@@ -30,7 +28,7 @@ function PlayerUnitNodeComponent({ data }: NodeProps) {
       }`}
     >
       <Handle type="target" position={Position.Left} className="player-card__handle" />
-      <div className="player-card__pos">{pos}</div>
+      <div className="player-card__type">{d.unitType}</div>
       <div className="player-card__name">{d.name}</div>
       <div className="player-card__stats">
         <span>v{d.versionCount}</span>

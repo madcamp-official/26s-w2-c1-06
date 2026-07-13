@@ -27,7 +27,7 @@ const nodeTypes: NodeTypes = {
   player: PlayerUnitNode
 }
 
-// SPEC 4.5 구조도 = FM 전술판. 커스텀 선수 카드 노드 + 선택 유닛 패스 강조.
+// SPEC 4.5 코드 구조도. 커스텀 유닛 카드 노드 + 선택 유닛 패스 강조.
 export function StructureOverview({
   units,
   edges,
@@ -68,7 +68,7 @@ export function StructureOverview({
   if (units.length === 0) {
     return (
       <div className="structure-overview structure-overview--empty">
-        전술판에 올라온 선수가 없습니다.
+        표시할 코드 유닛이 없습니다.
       </div>
     )
   }

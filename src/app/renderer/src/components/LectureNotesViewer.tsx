@@ -36,14 +36,13 @@ function groupBySession(notes: LectureNote[]): SessionGroup[] {
   return order.map((sessionId) => ({ sessionId, notes: bySession.get(sessionId)! }))
 }
 
-// 풀타임 리포트 스킨 — Markdown 본문은 기존 강의노트 그대로.
 export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerProps) {
   const [pendingKey, setPendingKey] = useState<string | null>(null)
 
   if (notes.length === 0) {
     return (
       <div className="lecture-notes lecture-notes--empty">
-        경기가 끝나면(세션 종료) 풀타임 리포트가 자동으로 생성됩니다.
+        세션이 종료되면 리포트가 자동으로 생성됩니다.
       </div>
     )
   }
@@ -51,14 +50,13 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
   const groups = groupBySession(notes)
 
   return (
-    <div className="lecture-notes lecture-notes--ft">
+    <div className="lecture-notes">
       {groups.map((group) => {
         const presentLevels = new Set(group.notes.map((note) => note.skill_level))
         return (
           <section key={group.sessionId} className="lecture-note-group">
             <div className="lecture-note-group__header">
-              <span className="lecture-note__ft-badge">FT</span>
-              <span className="lecture-note__session">경기 {group.sessionId.slice(0, 8)}</span>
+              <span className="lecture-note__session">세션 {group.sessionId.slice(0, 8)}</span>
               <div className="lecture-note-group__regen">
                 {ALL_LEVELS.filter((level) => !presentLevels.has(level)).map((level) => {
                   const key = `${group.sessionId}:${level}`
@@ -88,7 +86,6 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
             {group.notes.map((note) => (
               <article key={note.id} className="lecture-note">
                 <header className="lecture-note__header">
-                  <span className="lecture-note__ft-badge">FT</span>
                   <span className="lecture-note__skill">
                     {SKILL_LABEL[note.skill_level] ?? note.skill_level}
                   </span>

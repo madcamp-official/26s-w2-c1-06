@@ -50,7 +50,7 @@ function App() {
           disabled={!sessionId}
           onAsk={qna.ask}
         />
-        <span className="app__session">{sessionId ? `match: ${sessionId.slice(0, 8)}` : '경기 없음'}</span>
+        <span className="app__session">{sessionId ? `세션: ${sessionId.slice(0, 8)}` : '세션 없음'}</span>
       </header>
       <MatchBar session={session} prompts={prompts} matchStats={matchStats} />
       <section className="app__pane app__pane--full">
@@ -60,7 +60,7 @@ function App() {
       </section>
       <main className="app__main app__main--split">
         <section className="app__pane">
-          <h2 className="app__pane-title">라이브 중계</h2>
+          <h2 className="app__pane-title">실행 로그</h2>
           <TracePanel
             prompts={prompts}
             events={events}
@@ -71,7 +71,7 @@ function App() {
           />
         </section>
         <section className="app__pane">
-          <h2 className="app__pane-title">전술판</h2>
+          <h2 className="app__pane-title">코드 구조도</h2>
           <StructureOverview
             units={timeline.units}
             edges={timeline.edges}
@@ -79,12 +79,12 @@ function App() {
             onSelectUnit={timeline.selectUnit}
             unitStats={timeline.unitStats}
           />
-          <h2 className="app__pane-title app__pane-title--spaced">선수 상세</h2>
+          <h2 className="app__pane-title app__pane-title--spaced">유닛 히스토리</h2>
           <UnitTimeline versions={timeline.versions} explanations={timeline.explanations} />
         </section>
       </main>
       <section className="app__pane app__pane--full">
-        <h2 className="app__pane-title">풀타임 리포트</h2>
+        <h2 className="app__pane-title">세션 리포트</h2>
         <LectureNotesViewer notes={notes} onRegenerate={regenerate} />
       </section>
     </div>

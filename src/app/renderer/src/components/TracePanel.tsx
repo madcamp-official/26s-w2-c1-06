@@ -1,6 +1,6 @@
 import type { AssistantNote, Prompt, ToolEvent, ToolStatus } from '@shared/types'
 import { formatDuration, formatTime, truncateText } from '@shared/format'
-import { formatMatchMinute, matchMinute } from '@shared/match'
+import { elapsedMinutes, formatElapsedMinutes } from '@shared/match'
 import { groupIntoSteps, type Step } from '@shared/steps'
 
 interface TracePanelProps {
@@ -49,12 +49,12 @@ function groupStepsByTurn(prompts: Prompt[], steps: Step[]): TurnGroup[] {
 function stepBadge(
   step: Step,
   createdEventIds: Set<string> | undefined
-): { kind: 'new' | 'warn' | 'play'; label: string } {
+): { kind: 'new' | 'warn' | 'default'; label: string } {
   if (step.events.some((e) => e.status === 'error')) return { kind: 'warn', label: 'WARN' }
   if (createdEventIds && step.events.some((e) => createdEventIds.has(e.id))) {
     return { kind: 'new', label: 'NEW' }
   }
-  return { kind: 'play', label: 'PLAY' }
+  return { kind: 'default', label: '' }
 }
 
 interface EventRowProps {
@@ -90,8 +90,8 @@ interface StepBlockProps {
 function StepBlock({ step, sessionStartedAt, createdEventIds }: StepBlockProps) {
   const title = step.note
     ? truncateText(step.note.text.replace(/\s+/g, ' ').trim(), 40)
-    : '플레이 진행 중'
-  const minute = matchMinute(
+    : '진행 중'
+  const minute = elapsedMinutes(
     sessionStartedAt,
     step.note?.created_at ?? step.events[0]?.created_at ?? null
   )
@@ -109,8 +109,10 @@ function StepBlock({ step, sessionStartedAt, createdEventIds }: StepBlockProps) 
   return (
     <li className={`trace-step match-event match-event--${badge.kind}`}>
       <div className="match-event__meta">
-        <span className="match-event__minute">{formatMatchMinute(minute)}</span>
-        <span className={`match-event__badge match-event__badge--${badge.kind}`}>{badge.label}</span>
+        <span className="match-event__minute">{formatElapsedMinutes(minute)}</span>
+        {badge.label && (
+          <span className={`match-event__badge match-event__badge--${badge.kind}`}>{badge.label}</span>
+        )}
       </div>
       <div className="match-event__body">
         <h4 className="trace-step__title">{title}</h4>
@@ -137,13 +139,13 @@ export function TracePanel({
   createdEventIds
 }: TracePanelProps) {
   if (loading) {
-    return <div className="trace-panel trace-panel--empty">경기를 불러오는 중…</div>
+    return <div className="trace-panel trace-panel--empty">불러오는 중…</div>
   }
 
   if (events.length === 0 && notes.length === 0) {
     return (
       <div className="trace-panel trace-panel--empty">
-        아직 라이브 이벤트가 없습니다. 에이전트 세션이 시작되면 중계가 뜹니다.
+        아직 이벤트가 없습니다. 에이전트 세션이 시작되면 여기에 표시됩니다.
       </div>
     )
   }
@@ -158,7 +160,7 @@ export function TracePanel({
           <h3 className="trace-turn__header">
             {turn.prompt ? (
               <>
-                <span className="trace-turn__index">구간 {turn.prompt.turn_index + 1}</span>
+                <span className="trace-turn__index">요청 {turn.prompt.turn_index + 1}</span>
                 <span className="trace-turn__text">{turn.prompt.user_text ?? '—'}</span>
               </>
             ) : (
