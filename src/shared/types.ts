@@ -13,6 +13,9 @@ export interface UnitMatchStat {
   versionCount: number
   latestChangeType: ChangeType | null
   lastSeenAt: string | null
+  // 이 유닛의 최신 버전을 만든 스텝(assistant_notes.id) — 구조도 노드 클릭 시
+  // 진행상황 카드로 스크롤 이동하는 데 사용(SPEC 패치 v2 #6). 백필 전이면 null.
+  latestStepId: string | null
 }
 
 export interface MatchStats {
@@ -77,6 +80,7 @@ export interface CodeUnitVersion {
   diff_text: string | null
   tool_event_id: string | null
   prompt_id: string | null
+  step_id: string | null    // 이 버전을 만든 스텝(assistant_notes.id). progress-worker가 백필.
   created_at: string | null
 }
 
@@ -116,6 +120,8 @@ export interface AiExplanation {
   key_code_reason: string | null
   // step 행에만 채워짐: 이 스텝 완료 시점의 누적 퍼센트(0~100). code_unit_version 행은 null.
   step_percent: number | null
+  // success | failed. step 행 전용 — 스텝에 속한 tool_event 중 error가 하나라도 있으면 failed.
+  status: 'success' | 'failed' | null
   concept_tags: string | null // JSON 배열 문자열. code_unit_version 행에서만 쓰임(Level 3 개념 태그)
   created_at: string | null
 }

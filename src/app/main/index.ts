@@ -20,7 +20,7 @@ import type {
   ToolEvent,
   UnitMatchStat
 } from '@shared/types'
-import type { ProgressState, ProgressUpdate } from '@shared/progress'
+import type { LiveStatus, ProgressState, ProgressUpdate } from '@shared/progress'
 import { startPipeline } from '@pipeline/index'
 import { startProgressWorker } from './progress-worker'
 import { startLectureNoteWorker } from './lecture-note-worker'
@@ -47,8 +47,15 @@ function broadcastProgress(update: ProgressUpdate): void {
   }
 }
 
-const stopProgressWorker = startProgressWorker(db, aiProvider, {
-  onUpdate: broadcastProgress
+function broadcastLiveStatus(status: LiveStatus): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    win.webContents.send('progress:live-status', status)
+  }
+}
+
+const progressWorker = startProgressWorker(db, aiProvider, {
+  onUpdate: broadcastProgress,
+  onLiveUpdate: broadcastLiveStatus
 })
 const stopLectureNoteWorker = startLectureNoteWorker(db, aiProvider)
 const loadSessionTrace = createSessionTraceLoader(db)
@@ -146,6 +153,11 @@ const getUnitMatchStatsStmt = db.prepare(`
       WHERE v2.unit_id = u.id
       ORDER BY v2.version_no DESC LIMIT 1
     ) AS latestChangeType,
+    (
+      SELECT v3.step_id FROM code_unit_versions v3
+      WHERE v3.unit_id = u.id
+      ORDER BY v3.version_no DESC LIMIT 1
+    ) AS latestStepId,
     u.last_seen_at AS lastSeenAt
   FROM code_units u
   LEFT JOIN code_unit_versions v ON v.unit_id = u.id
@@ -218,9 +230,12 @@ const getCachedExplanationStmt = db.prepare(`
 // progress-worker의 progress:update는 push라 렌더러가 아직 마운트되기 전에 끝난
 // 스텝은 유실될 수 있다(Electron IPC는 버퍼링 안 함) — 렌더러 마운트 시 이 조회로
 // "지금까지 쌓인 상태"를 한 번 당겨와 초기화한다(useProgress 참고).
-const PROGRESS_HISTORY_LIMIT = 6
+// 6에서 늘림: StepLog의 "이전 진행상황 더 보기" 접기/펼치기(SPEC 패치 v2 #7)가
+// 이 캐치업 조회로 채워진 history를 그대로 쓰므로, 접힌 카드까지 한 번에 갖고 있어야
+// 별도 IPC 없이 순수 클라이언트 렌더링만으로 펼치기가 동작한다.
+const PROGRESS_HISTORY_LIMIT = 100
 const getRecentStepProgressStmt = db.prepare(`
-  SELECT target_id, summary, key_code_snippet, key_code_lang, key_code_file, key_code_reason, step_percent
+  SELECT target_id, summary, key_code_snippet, key_code_lang, key_code_file, key_code_reason, step_percent, status
   FROM ai_explanations
   WHERE target_type = 'step' AND step_percent IS NOT NULL
   ORDER BY created_at DESC
@@ -231,12 +246,12 @@ const upsertExplanationStmt = db.prepare(`
   INSERT INTO ai_explanations (
     id, target_type, target_id, skill_level, summary,
     key_code_snippet, key_code_lang, key_code_file, key_code_reason, step_percent,
-    concept_tags, created_at
+    status, concept_tags, created_at
   )
   VALUES (
     @id, @target_type, @target_id, @skill_level, @summary,
     @key_code_snippet, @key_code_lang, @key_code_file, @key_code_reason, @step_percent,
-    @concept_tags, @created_at
+    @status, @concept_tags, @created_at
   )
   ON CONFLICT(target_type, target_id, skill_level) DO UPDATE SET
     summary = excluded.summary,
@@ -245,6 +260,7 @@ const upsertExplanationStmt = db.prepare(`
     key_code_file = excluded.key_code_file,
     key_code_reason = excluded.key_code_reason,
     step_percent = excluded.step_percent,
+    status = excluded.status,
     concept_tags = excluded.concept_tags,
     created_at = excluded.created_at
 `)
@@ -287,6 +303,7 @@ function registerIpcHandlers(): void {
       key_code_file: string | null
       key_code_reason: string | null
       step_percent: number
+      status: 'success' | 'failed' | null
     }[]
     return {
       percent: rows[0]?.step_percent ?? 0,
@@ -301,9 +318,17 @@ function registerIpcHandlers(): void {
                 filePath: row.key_code_file,
                 reason: row.key_code_reason
               }
-            : null
+            : null,
+        status: row.status ?? 'success'
       }))
     }
+  })
+
+  // progress:live-status도 push라 렌더러 마운트 전에 발생한 상태 변화(특히 이 워커가
+  // BrowserWindow 생성 전에 쏘는 최초 tick)는 유실될 수 있다 — useLiveStatus 마운트 시
+  // 한 번 당겨와 초기화한다(getProgressState와 동일한 캐치업 패턴).
+  ipcMain.handle('db:getLiveStatus', (): LiveStatus => {
+    return progressWorker.getLiveStatus()
   })
 
   ipcMain.handle('db:getCreatedToolEventIds', (_event, sessionId: string): string[] => {
@@ -409,6 +434,7 @@ function registerIpcHandlers(): void {
         key_code_file: null,
         key_code_reason: null,
         step_percent: null,
+        status: 'success',
         concept_tags: JSON.stringify(caption.conceptTags),
         created_at: new Date().toISOString()
       }
@@ -489,7 +515,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  stopProgressWorker()
+  progressWorker.stop()
   stopLectureNoteWorker()
   pipeline?.stop()
   db.close()

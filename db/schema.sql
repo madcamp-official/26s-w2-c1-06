@@ -67,6 +67,10 @@ CREATE TABLE IF NOT EXISTS code_unit_versions (
   diff_text TEXT,
   tool_event_id TEXT REFERENCES tool_events(id),
   prompt_id TEXT REFERENCES prompts(id),
+  step_id TEXT REFERENCES assistant_notes(id),  -- 이 버전을 만든 스텝(=assistant_notes.id).
+                             -- pipeline insert 시점엔 스텝 개념이 없어 항상 NULL로 들어오고,
+                             -- progress-worker가 매 tick마다 tool_event_id로 역추적해 채운다
+                             -- (구조도 노드 클릭 → 진행상황 카드 연결에 사용, SPEC 패치 v2 #6).
   created_at DATETIME,
   UNIQUE(unit_id, version_no)
 );
@@ -104,6 +108,9 @@ CREATE TABLE IF NOT EXISTS ai_explanations (
   key_code_file TEXT,       -- 코드가 위치한 파일 경로
   key_code_reason TEXT,     -- 왜 지금 이 코드를 보면 좋은지 한 줄
   step_percent INTEGER,     -- 이 스텝 완료 시점의 누적 퍼센트 (step 행 전용)
+  status TEXT DEFAULT 'success',  -- success | failed (step 행 전용). 스텝에 속한 tool_event 중
+                             -- 하나라도 error가 있으면 failed — progress-worker가 로컬 계산
+                             -- (AI 응답에 좌우되지 않도록 Gemini 요약과 별개로 결정).
   concept_tags TEXT,        -- JSON 배열, 예: ["디바운스","useEffect"] → Level 3 개념 태그 (SPEC 5장, code_unit_version 전용)
   created_at DATETIME,
   UNIQUE(target_type, target_id, skill_level)

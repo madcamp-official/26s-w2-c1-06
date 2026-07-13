@@ -13,7 +13,7 @@ import type {
   ToolEvent,
   UnitMatchStat
 } from '@shared/types'
-import type { ProgressState, ProgressUpdate } from '@shared/progress'
+import type { LiveStatus, ProgressState, ProgressUpdate } from '@shared/progress'
 
 const factcodingApi = {
   getLatestSessionId: (): Promise<string | null> => ipcRenderer.invoke('db:getLatestSessionId'),
@@ -22,6 +22,7 @@ const factcodingApi = {
     ipcRenderer.invoke('db:getMatchStats', sessionId),
   getUnitMatchStats: (): Promise<UnitMatchStat[]> => ipcRenderer.invoke('db:getUnitMatchStats'),
   getProgressState: (): Promise<ProgressState> => ipcRenderer.invoke('db:getProgressState'),
+  getLiveStatus: (): Promise<LiveStatus> => ipcRenderer.invoke('db:getLiveStatus'),
   getCreatedToolEventIds: (sessionId: string): Promise<string[]> =>
     ipcRenderer.invoke('db:getCreatedToolEventIds', sessionId),
   getToolEvents: (sessionId: string): Promise<ToolEvent[]> =>
@@ -57,6 +58,16 @@ const factcodingApi = {
     ipcRenderer.on('progress:update', listener)
     return () => {
       ipcRenderer.removeListener('progress:update', listener)
+    }
+  },
+
+  onLiveStatus: (callback: (status: LiveStatus) => void): (() => void) => {
+    const listener = (_event: IpcRendererEvent, status: LiveStatus): void => {
+      callback(status)
+    }
+    ipcRenderer.on('progress:live-status', listener)
+    return () => {
+      ipcRenderer.removeListener('progress:live-status', listener)
     }
   }
 }

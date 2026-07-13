@@ -71,7 +71,12 @@ export class MockAIProvider implements AIProvider {
                 ? 'ts'
                 : 'text',
               snippet: `// ${editEvent.tool_name} on ${editEvent.file_path}`,
-              reason: '이번 스텝에서 가장 핵심적으로 바뀐 코드예요.'
+              // reason도 실제 프롬프트 지시문(재사용/실수포인트/등장맥락)과 같은 톤을 mock에서도
+              // 재현해 Gemini 없이도 UI를 검증할 수 있게 한다.
+              reason:
+                failed > 0
+                  ? '이 부분이 방금 실패의 원인이 된 지점이에요.'
+                  : '앞으로 이 코드 형태를 다른 곳에서도 다시 쓰게 되니 기억해두세요.'
             }
           : null
       }

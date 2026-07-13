@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { LectureNotesViewer } from './components/LectureNotesViewer'
+import { LiveStatusLine } from './components/LiveStatusLine'
 import { MatchBar } from './components/MatchBar'
 import { OnboardingModal } from './components/OnboardingModal'
 import { ProgressTurtleBar } from './components/ProgressTurtleBar'
@@ -10,6 +11,7 @@ import { StructureOverview } from './components/StructureOverview'
 import { TracePanel } from './components/TracePanel'
 import { UnitTimeline } from './components/UnitTimeline'
 import { useLectureNotes } from './hooks/useLectureNotes'
+import { useLiveStatus } from './hooks/useLiveStatus'
 import { useOnboarding } from './hooks/useOnboarding'
 import { useProgress } from './hooks/useProgress'
 import { useQna } from './hooks/useQna'
@@ -34,7 +36,16 @@ function App() {
   const { needsOnboarding, complete } = useOnboarding(setSkillLevel)
   const qna = useQna(sessionId, skillLevel)
   const progress = useProgress()
+  const liveStatus = useLiveStatus()
   const [qnaOpen, setQnaOpen] = useState(false)
+  const [highlightStepId, setHighlightStepId] = useState<string | null>(null)
+
+  // 구조도 노드 클릭 → 그 유닛의 최신 버전을 만든 스텝(진행상황 카드)으로 스크롤 이동
+  // (SPEC 패치 v2 #6). 유닛 선택 자체(오른쪽 타임라인 표시)는 그대로 timeline이 담당.
+  const handleSelectUnit = (unitId: string): void => {
+    timeline.selectUnit(unitId)
+    setHighlightStepId(timeline.unitStats.get(unitId)?.latestStepId ?? null)
+  }
 
   return (
     <div className="app">
@@ -55,8 +66,16 @@ function App() {
       <MatchBar session={session} prompts={prompts} matchStats={matchStats} />
       <section className="app__pane app__pane--full">
         <h2 className="app__pane-title">진행상황</h2>
-        <ProgressTurtleBar percent={progress.percent} justCompleted={progress.justCompleted} />
-        <StepLog history={progress.history} />
+        <LiveStatusLine status={liveStatus} />
+        <ProgressTurtleBar
+          percent={progress.percent}
+          justCompleted={progress.justCompleted}
+          cycleNumber={progress.cycleNumber}
+          stepsInCycle={progress.stepsInCycle}
+          cycleSize={progress.cycleSize}
+          failMarks={progress.failMarks}
+        />
+        <StepLog history={progress.history} highlightStepId={highlightStepId} />
       </section>
       <main className="app__main app__main--split">
         <section className="app__pane">
@@ -76,7 +95,7 @@ function App() {
             units={timeline.units}
             edges={timeline.edges}
             selectedUnitId={timeline.selectedUnitId}
-            onSelectUnit={timeline.selectUnit}
+            onSelectUnit={handleSelectUnit}
             unitStats={timeline.unitStats}
           />
           <h2 className="app__pane-title app__pane-title--spaced">유닛 히스토리</h2>
