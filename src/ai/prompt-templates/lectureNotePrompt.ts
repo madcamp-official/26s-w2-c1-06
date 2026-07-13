@@ -9,13 +9,7 @@ export function buildLectureNotePrompt(trace: SessionTrace, skillLevel: SkillLev
     .map((prompt) => `- turn ${prompt.turn_index + 1}: ${prompt.user_text ?? '(no text)'}`)
     .join('\n')
 
-  const stepLines = trace.steps
-    .map((step) => {
-      const tags = step.conceptTags.length > 0 ? ` [${step.conceptTags.join(', ')}]` : ''
-      const why = step.why ? ` / 왜: ${step.why}` : ''
-      return `- ${step.title || '(제목 없음)'}: ${step.body}${why}${tags}`
-    })
-    .join('\n')
+  const stepLines = trace.steps.map((step) => `- ${step.summary}`).join('\n')
 
   const versionLines = trace.versions
     .map(

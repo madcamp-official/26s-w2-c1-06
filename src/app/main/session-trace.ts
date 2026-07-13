@@ -10,7 +10,6 @@ import type {
   Session,
   ToolEvent
 } from '@shared/types'
-import { parseConceptTags, parseStepExplanation } from '@shared/format'
 import { groupIntoSteps } from '@shared/steps'
 
 // lecture-note-worker(자동 합성)와 온디맨드 재생성 IPC가 동일한 조회 로직을 쓰도록
@@ -62,24 +61,10 @@ export function createSessionTraceLoader(
       .filter((step) => step.id !== null && step.events.length > 0)
       .map((step) => {
         const explanation = byId.get(step.id!)
-        if (explanation) {
-          const parsed = parseStepExplanation(explanation.content)
-          return {
-            title: parsed.title,
-            body: parsed.body,
-            why: parsed.why,
-            conceptTags: parseConceptTags(explanation.concept_tags)
-          }
-        }
-        // 캡션 없으면 note 앞부분으로 최소 서사라도 넣는다.
-        return {
-          title: '',
-          body: step.note?.text?.slice(0, 200) ?? '',
-          why: '',
-          conceptTags: []
-        }
+        // 요약 없으면 note 앞부분으로 최소 서사라도 넣는다.
+        return { summary: explanation?.summary || step.note?.text?.slice(0, 200) || '' }
       })
-      .filter((step) => step.body.length > 0)
+      .filter((step) => step.summary.length > 0)
 
     return {
       session,

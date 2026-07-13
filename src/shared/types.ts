@@ -106,8 +106,17 @@ export interface AiExplanation {
   target_type: AiExplanationTargetType
   target_id: string
   skill_level: SkillLevel
-  content: string
-  concept_tags: string | null // JSON 배열 문자열
+  // 짧은 요약 텍스트. step 행: progress-worker가 채우는 진행상황 요약.
+  // code_unit_version 행: 기존 그대로 "무엇이 왜 바뀌었는지" 캡션.
+  summary: string
+  // 아래 4개는 step 행에만 채워짐(진행상황 패널의 "핵심 코드" 카드) — code_unit_version 행은 전부 null.
+  key_code_snippet: string | null
+  key_code_lang: string | null
+  key_code_file: string | null
+  key_code_reason: string | null
+  // step 행에만 채워짐: 이 스텝 완료 시점의 누적 퍼센트(0~100). code_unit_version 행은 null.
+  step_percent: number | null
+  concept_tags: string | null // JSON 배열 문자열. code_unit_version 행에서만 쓰임(Level 3 개념 태그)
   created_at: string | null
 }
 

@@ -28,21 +28,23 @@ export interface StepInput {
   events: ToolEvent[]
 }
 
-export interface StepCaption {
+// 진행상황 패널(거북이 로딩바) 전용 — 스텝 완료 시 생성되는 초단문 요약 + 핵심 코드.
+export interface KeyCode {
+  filePath: string
+  lang: string
+  snippet: string
+  reason: string
+}
+
+export interface ProgressSummary {
   stepId: string
-  title: string
-  caption: string
-  why: string
-  ttsScript: string
-  conceptTags: string[]
+  summary: string
+  keyCode: KeyCode | null
 }
 
 // 강의노트에 넣을 학습 스텝 요약(도구 나열 대신 탑다운 서사 우선).
 export interface StepSummaryForNote {
-  title: string
-  body: string
-  why: string
-  conceptTags: string[]
+  summary: string
 }
 
 // SPEC 4.3.2 강의노트 합성 입력: 세션 전체를 한 번에 컨텍스트로 투입.
@@ -66,7 +68,7 @@ export interface ContextBundle {
 // 강의노트 합성(4.3.2)·Q&A 챗(4.3.3).
 export interface AIProvider {
   explainBatch(events: ToolEvent[], notes: AssistantNote[], skillLevel: SkillLevel): Promise<BatchCaption[]>
-  explainSteps(steps: StepInput[], skillLevel: SkillLevel): Promise<StepCaption[]>
+  summarizeProgress(steps: StepInput[], skillLevel: SkillLevel): Promise<ProgressSummary[]>
   explainUnitVersions(
     versions: CodeUnitVersionWithUnit[],
     skillLevel: SkillLevel

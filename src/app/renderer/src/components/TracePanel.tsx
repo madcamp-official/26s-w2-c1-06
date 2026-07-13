@@ -1,11 +1,5 @@
-import type { AiExplanation, AssistantNote, Prompt, ToolEvent, ToolStatus } from '@shared/types'
-import {
-  formatDuration,
-  formatTime,
-  parseConceptTags,
-  parseStepExplanation,
-  truncateText
-} from '@shared/format'
+import type { AssistantNote, Prompt, ToolEvent, ToolStatus } from '@shared/types'
+import { formatDuration, formatTime, truncateText } from '@shared/format'
 import { formatMatchMinute, matchMinute } from '@shared/match'
 import { groupIntoSteps, type Step } from '@shared/steps'
 
@@ -13,13 +7,9 @@ interface TracePanelProps {
   prompts: Prompt[]
   events: ToolEvent[]
   notes: AssistantNote[]
-  stepExplanations: Map<string, AiExplanation>
   loading: boolean
   sessionStartedAt?: string | null
   createdEventIds?: Set<string>
-  onConceptClick?: (tag: string) => void
-  /** 지금 캐스터 음성이 낭독 중인 stepId — 해당 스텝 카드를 강조 표시. */
-  speakingStepId?: string | null
 }
 
 interface TurnGroup {
@@ -54,17 +44,6 @@ function groupStepsByTurn(prompts: Prompt[], steps: Step[]): TurnGroup[] {
   if (orphanSteps.length > 0) groups.push({ prompt: null, steps: orphanSteps })
 
   return groups.filter((group) => group.steps.length > 0)
-}
-
-function turnLearningTitle(steps: Step[], stepExplanations: Map<string, AiExplanation>): string | null {
-  for (const step of steps) {
-    if (!step.id) continue
-    const summary = stepExplanations.get(step.id)
-    if (!summary) continue
-    const title = parseStepExplanation(summary.content).title
-    if (title) return title
-  }
-  return null
 }
 
 function stepBadge(
@@ -102,33 +81,21 @@ function EventRow({ event }: EventRowProps) {
 
 interface StepBlockProps {
   step: Step
-  summary: AiExplanation | undefined
   sessionStartedAt?: string | null
   createdEventIds?: Set<string>
-  onConceptClick?: (tag: string) => void
-  speaking?: boolean
 }
 
-function StepBlock({
-  step,
-  summary,
-  sessionStartedAt,
-  createdEventIds,
-  onConceptClick,
-  speaking
-}: StepBlockProps) {
-  const parsed = summary ? parseStepExplanation(summary.content) : null
-  const tags = summary ? parseConceptTags(summary.concept_tags) : []
-  const fallbackTitle = step.note
+// 원시 트레이스 로그 — AI 요약/핵심 코드는 ProgressTurtleBar+StepLog(진행상황 패널)가
+// 전담한다. 여기서는 실제로 일어난 일(시각/도구/상태/에이전트 원문)만 보여준다.
+function StepBlock({ step, sessionStartedAt, createdEventIds }: StepBlockProps) {
+  const title = step.note
     ? truncateText(step.note.text.replace(/\s+/g, ' ').trim(), 40)
     : '플레이 진행 중'
-  const title = parsed?.title || fallbackTitle
   const minute = matchMinute(
     sessionStartedAt,
     step.note?.created_at ?? step.events[0]?.created_at ?? null
   )
   const badge = stepBadge(step, createdEventIds)
-  const expectsSummary = step.id !== null && step.events.length > 0
 
   const eventList =
     step.events.length > 0 ? (
@@ -140,63 +107,15 @@ function StepBlock({
     ) : null
 
   return (
-    <li
-      className={`trace-step match-event match-event--${badge.kind} ${
-        speaking ? 'match-event--speaking' : ''
-      }`}
-    >
+    <li className={`trace-step match-event match-event--${badge.kind}`}>
       <div className="match-event__meta">
         <span className="match-event__minute">{formatMatchMinute(minute)}</span>
         <span className={`match-event__badge match-event__badge--${badge.kind}`}>{badge.label}</span>
-        {speaking && <span className="match-event__onair">🔊</span>}
       </div>
       <div className="match-event__body">
         <h4 className="trace-step__title">{title}</h4>
 
-        {expectsSummary ? (
-          parsed && parsed.body ? (
-            <div className="trace-step__summary">
-              <p className="trace-step__body">{parsed.body}</p>
-              {parsed.why && (
-                <p className="trace-step__why">
-                  <span className="trace-step__why-label">왜</span>
-                  {parsed.why}
-                </p>
-              )}
-              {tags.length > 0 && (
-                <div className="trace-step__tags">
-                  {tags.map((tag) =>
-                    onConceptClick ? (
-                      <button
-                        key={tag}
-                        type="button"
-                        className="trace-item__tag trace-item__tag--clickable"
-                        onClick={() => onConceptClick(tag)}
-                      >
-                        {tag}
-                      </button>
-                    ) : (
-                      <span key={tag} className="trace-item__tag">
-                        {tag}
-                      </span>
-                    )
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="trace-step__summary trace-step__summary--pending">중계 준비 중…</div>
-          )
-        ) : (
-          step.note && <p className="trace-step__body">{step.note.text}</p>
-        )}
-
-        {step.note && expectsSummary && (
-          <details className="trace-step__details">
-            <summary className="trace-step__details-toggle">에이전트 원문</summary>
-            <p className="trace-note">{step.note.text}</p>
-          </details>
-        )}
+        {step.note && <p className="trace-step__body">{step.note.text}</p>}
 
         {eventList && (
           <details className="trace-step__details">
@@ -213,12 +132,9 @@ export function TracePanel({
   prompts,
   events,
   notes,
-  stepExplanations,
   loading,
   sessionStartedAt,
-  createdEventIds,
-  onConceptClick,
-  speakingStepId
+  createdEventIds
 }: TracePanelProps) {
   if (loading) {
     return <div className="trace-panel trace-panel--empty">경기를 불러오는 중…</div>
@@ -237,37 +153,30 @@ export function TracePanel({
 
   return (
     <div className="trace-panel">
-      {turns.map((turn) => {
-        const learningTitle = turnLearningTitle(turn.steps, stepExplanations)
-        return (
-          <section key={turn.prompt?.id ?? 'orphan'} className="trace-turn">
-            <h3 className="trace-turn__header">
-              {turn.prompt ? (
-                <>
-                  <span className="trace-turn__index">구간 {turn.prompt.turn_index + 1}</span>
-                  {learningTitle && <span className="trace-turn__learning">{learningTitle}</span>}
-                  <span className="trace-turn__text">{turn.prompt.user_text ?? '—'}</span>
-                </>
-              ) : (
-                <span className="trace-turn__text">연결된 지시 없음 (수동 수정 등)</span>
-              )}
-            </h3>
-            <ul className="trace-turn__steps">
-              {turn.steps.map((step, i) => (
-                <StepBlock
-                  key={step.id ?? `${turn.prompt?.id ?? 'orphan'}:lead:${i}`}
-                  step={step}
-                  summary={step.id ? stepExplanations.get(step.id) : undefined}
-                  sessionStartedAt={sessionStartedAt}
-                  createdEventIds={createdEventIds}
-                  onConceptClick={onConceptClick}
-                  speaking={step.id !== null && step.id === speakingStepId}
-                />
-              ))}
-            </ul>
-          </section>
-        )
-      })}
+      {turns.map((turn) => (
+        <section key={turn.prompt?.id ?? 'orphan'} className="trace-turn">
+          <h3 className="trace-turn__header">
+            {turn.prompt ? (
+              <>
+                <span className="trace-turn__index">구간 {turn.prompt.turn_index + 1}</span>
+                <span className="trace-turn__text">{turn.prompt.user_text ?? '—'}</span>
+              </>
+            ) : (
+              <span className="trace-turn__text">연결된 지시 없음 (수동 수정 등)</span>
+            )}
+          </h3>
+          <ul className="trace-turn__steps">
+            {turn.steps.map((step, i) => (
+              <StepBlock
+                key={step.id ?? `${turn.prompt?.id ?? 'orphan'}:lead:${i}`}
+                step={step}
+                sessionStartedAt={sessionStartedAt}
+                createdEventIds={createdEventIds}
+              />
+            ))}
+          </ul>
+        </section>
+      ))}
     </div>
   )
 }

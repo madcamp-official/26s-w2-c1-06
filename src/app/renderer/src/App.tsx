@@ -1,15 +1,17 @@
-import { useCallback, useState } from 'react'
+import { useState } from 'react'
 import { LectureNotesViewer } from './components/LectureNotesViewer'
 import { MatchBar } from './components/MatchBar'
 import { OnboardingModal } from './components/OnboardingModal'
+import { ProgressTurtleBar } from './components/ProgressTurtleBar'
 import { QnaChat } from './components/QnaChat'
 import { SkillLevelToggle } from './components/SkillLevelToggle'
+import { StepLog } from './components/StepLog'
 import { StructureOverview } from './components/StructureOverview'
 import { TracePanel } from './components/TracePanel'
 import { UnitTimeline } from './components/UnitTimeline'
-import { useCasterAudio } from './hooks/useCasterAudio'
 import { useLectureNotes } from './hooks/useLectureNotes'
 import { useOnboarding } from './hooks/useOnboarding'
+import { useProgress } from './hooks/useProgress'
 import { useQna } from './hooks/useQna'
 import { useSessionTrace } from './hooks/useSessionTrace'
 import { useSkillLevel } from './hooks/useSkillLevel'
@@ -25,23 +27,14 @@ function App() {
     prompts,
     events,
     notes: assistantNotes,
-    stepExplanations,
     loading
   } = useSessionTrace(skillLevel)
   const timeline = useUnitTimeline(skillLevel)
   const { notes, regenerate } = useLectureNotes()
   const { needsOnboarding, complete } = useOnboarding(setSkillLevel)
   const qna = useQna(sessionId, skillLevel)
-  const { enabled: ttsEnabled, setEnabled: setTtsEnabled, speakingStepId } = useCasterAudio()
+  const progress = useProgress()
   const [qnaOpen, setQnaOpen] = useState(false)
-  const [qnaPrefill, setQnaPrefill] = useState<string | null>(null)
-
-  const clearPrefill = useCallback(() => setQnaPrefill(null), [])
-
-  const handleConceptClick = useCallback((tag: string) => {
-    setQnaPrefill(`"${tag}"이(가) 뭐야? 이번 세션 기준으로 짧게 설명해줘`)
-    setQnaOpen(true)
-  }, [])
 
   return (
     <div className="app">
@@ -49,18 +42,6 @@ function App() {
       <header className="app__header">
         <h1>Factcoding</h1>
         <SkillLevelToggle value={skillLevel} onChange={setSkillLevel} />
-        <button
-          type="button"
-          className={`tts-toggle ${ttsEnabled ? 'tts-toggle--on' : ''}`}
-          onClick={() => setTtsEnabled(!ttsEnabled)}
-          title={
-            ttsEnabled
-              ? '캐스터 중계 끄기 (매니저 지시)'
-              : '캐스터 중계 켜기 (매니저 지시)'
-          }
-        >
-          {ttsEnabled ? '중계 ON' : '중계 OFF'}
-        </button>
         <QnaChat
           open={qnaOpen}
           onToggle={() => setQnaOpen((prev) => !prev)}
@@ -68,20 +49,15 @@ function App() {
           pending={qna.pending}
           disabled={!sessionId}
           onAsk={qna.ask}
-          prefill={qnaPrefill}
-          onPrefillConsumed={clearPrefill}
         />
         <span className="app__session">{sessionId ? `match: ${sessionId.slice(0, 8)}` : '경기 없음'}</span>
       </header>
-      <MatchBar
-        session={session}
-        prompts={prompts}
-        notes={assistantNotes}
-        events={events}
-        stepExplanations={stepExplanations}
-        matchStats={matchStats}
-        speakingStepId={speakingStepId}
-      />
+      <MatchBar session={session} prompts={prompts} matchStats={matchStats} />
+      <section className="app__pane app__pane--full">
+        <h2 className="app__pane-title">진행상황</h2>
+        <ProgressTurtleBar percent={progress.percent} justCompleted={progress.justCompleted} />
+        <StepLog history={progress.history} />
+      </section>
       <main className="app__main app__main--split">
         <section className="app__pane">
           <h2 className="app__pane-title">라이브 중계</h2>
@@ -89,12 +65,9 @@ function App() {
             prompts={prompts}
             events={events}
             notes={assistantNotes}
-            stepExplanations={stepExplanations}
             loading={loading}
             sessionStartedAt={session?.started_at}
             createdEventIds={createdEventIds}
-            onConceptClick={handleConceptClick}
-            speakingStepId={speakingStepId}
           />
         </section>
         <section className="app__pane">

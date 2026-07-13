@@ -13,7 +13,7 @@ import type {
   ToolEvent,
   UnitMatchStat
 } from '@shared/types'
-import type { TtsSettings, TtsUtterance } from '@shared/tts'
+import type { ProgressUpdate } from '@shared/progress'
 
 const factcodingApi = {
   getLatestSessionId: (): Promise<string | null> => ipcRenderer.invoke('db:getLatestSessionId'),
@@ -33,8 +33,6 @@ const factcodingApi = {
   setSkillLevel: (level: SkillLevel): Promise<void> => ipcRenderer.invoke('db:setSkillLevel', level),
   getExplanations: (sessionId: string, skillLevel: SkillLevel): Promise<AiExplanation[]> =>
     ipcRenderer.invoke('db:getExplanations', sessionId, skillLevel),
-  getStepExplanations: (sessionId: string, skillLevel: SkillLevel): Promise<AiExplanation[]> =>
-    ipcRenderer.invoke('db:getStepExplanations', sessionId, skillLevel),
   getCodeUnits: (): Promise<CodeUnit[]> => ipcRenderer.invoke('db:getCodeUnits'),
   getUnitVersions: (unitId: string): Promise<CodeUnitVersionWithUnit[]> =>
     ipcRenderer.invoke('db:getUnitVersions', unitId),
@@ -51,22 +49,13 @@ const factcodingApi = {
   answerQuestion: (sessionId: string, question: string, skillLevel: SkillLevel): Promise<string> =>
     ipcRenderer.invoke('db:answerQuestion', sessionId, question, skillLevel),
 
-  getTtsSettings: (): Promise<TtsSettings> => ipcRenderer.invoke('tts:getSettings'),
-  setTtsEnabled: (enabled: boolean): Promise<void> => ipcRenderer.invoke('tts:setEnabled', enabled),
-  setTtsVoice: (voice: TtsSettings['voice']): Promise<void> =>
-    ipcRenderer.invoke('tts:setVoice', voice),
-  speakTts: (payload: {
-    id: string
-    text: string
-    priority?: TtsUtterance['priority']
-  }): Promise<TtsUtterance | null> => ipcRenderer.invoke('tts:speak', payload),
-  onTtsUtterance: (callback: (utterance: TtsUtterance) => void): (() => void) => {
-    const listener = (_event: IpcRendererEvent, utterance: TtsUtterance): void => {
-      callback(utterance)
+  onProgressUpdate: (callback: (update: ProgressUpdate) => void): (() => void) => {
+    const listener = (_event: IpcRendererEvent, update: ProgressUpdate): void => {
+      callback(update)
     }
-    ipcRenderer.on('tts:utterance', listener)
+    ipcRenderer.on('progress:update', listener)
     return () => {
-      ipcRenderer.removeListener('tts:utterance', listener)
+      ipcRenderer.removeListener('progress:update', listener)
     }
   }
 }

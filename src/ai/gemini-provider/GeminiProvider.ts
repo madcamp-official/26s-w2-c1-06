@@ -4,20 +4,24 @@ import type {
   AIProvider,
   BatchCaption,
   ContextBundle,
+  KeyCode,
+  ProgressSummary,
   SessionTrace,
-  StepCaption,
   StepInput,
   VersionCaption
 } from '../types'
 import type { GeminiKeyPool } from '../key-pool/GeminiKeyPool'
 import { buildAnswerQuestionPrompt } from '../prompt-templates/answerQuestionPrompt'
 import { buildExplainBatchPrompt, EXPLAIN_BATCH_RESPONSE_SCHEMA } from '../prompt-templates/explainBatchPrompt'
-import { buildExplainStepsPrompt, EXPLAIN_STEPS_RESPONSE_SCHEMA } from '../prompt-templates/explainStepPrompt'
 import {
   buildExplainVersionsPrompt,
   EXPLAIN_VERSIONS_RESPONSE_SCHEMA
 } from '../prompt-templates/explainVersionsPrompt'
 import { buildLectureNotePrompt } from '../prompt-templates/lectureNotePrompt'
+import {
+  buildProgressSummaryPrompt,
+  PROGRESS_SUMMARY_RESPONSE_SCHEMA
+} from '../prompt-templates/progressSummaryPrompt'
 
 // 'gemini-2.5-flash'는 이 프로젝트의 키 발급 시점 기준 신규 사용자에게 더 이상
 // 제공되지 않아(404), 구글이 계속 최신 무료 flash 모델을 가리키도록 유지하는
@@ -27,12 +31,32 @@ const MODEL = 'gemini-flash-latest'
 interface RawCaption {
   eventId?: string
   versionId?: string
-  stepId?: string
-  title?: string
   caption: string
-  why?: string
-  ttsScript?: string
   conceptTags: string[]
+}
+
+interface RawKeyCode {
+  filePath?: string
+  lang?: string
+  snippet?: string
+  reason?: string
+}
+
+interface RawProgressSummary {
+  stepId?: string
+  summary?: string
+  keyCode?: RawKeyCode | null
+}
+
+function sanitizeKeyCode(raw: RawKeyCode | null | undefined): KeyCode | null {
+  if (!raw) return null
+  if (!raw.filePath || !raw.lang || !raw.snippet || !raw.reason) return null
+  return {
+    filePath: raw.filePath,
+    lang: raw.lang,
+    snippet: raw.snippet,
+    reason: raw.reason
+  }
 }
 
 export class GeminiProvider implements AIProvider {
@@ -43,7 +67,7 @@ export class GeminiProvider implements AIProvider {
   async explainBatch(events: ToolEvent[], notes: AssistantNote[], skillLevel: SkillLevel): Promise<BatchCaption[]> {
     if (events.length === 0) return []
 
-    const raw = await this.generateJson(
+    const raw = await this.generateJson<RawCaption>(
       buildExplainBatchPrompt(events, notes, skillLevel),
       EXPLAIN_BATCH_RESPONSE_SCHEMA
     )
@@ -58,24 +82,21 @@ export class GeminiProvider implements AIProvider {
       }))
   }
 
-  async explainSteps(steps: StepInput[], skillLevel: SkillLevel): Promise<StepCaption[]> {
+  async summarizeProgress(steps: StepInput[], skillLevel: SkillLevel): Promise<ProgressSummary[]> {
     if (steps.length === 0) return []
 
-    const raw = await this.generateJson(
-      buildExplainStepsPrompt(steps, skillLevel),
-      EXPLAIN_STEPS_RESPONSE_SCHEMA
+    const raw = await this.generateJson<RawProgressSummary>(
+      buildProgressSummaryPrompt(steps, skillLevel),
+      PROGRESS_SUMMARY_RESPONSE_SCHEMA
     )
     const knownIds = new Set(steps.map((step) => step.stepId))
 
     return raw
-      .filter((item) => item.stepId && knownIds.has(item.stepId))
+      .filter((item) => item.stepId && knownIds.has(item.stepId) && item.summary?.trim())
       .map((item) => ({
         stepId: item.stepId!,
-        title: item.title?.trim() || '학습 스텝',
-        caption: item.caption,
-        why: item.why?.trim() || '',
-        ttsScript: item.ttsScript?.trim() || item.caption,
-        conceptTags: item.conceptTags ?? []
+        summary: item.summary!.trim(),
+        keyCode: sanitizeKeyCode(item.keyCode)
       }))
   }
 
@@ -85,7 +106,7 @@ export class GeminiProvider implements AIProvider {
   ): Promise<VersionCaption[]> {
     if (versions.length === 0) return []
 
-    const raw = await this.generateJson(
+    const raw = await this.generateJson<RawCaption>(
       buildExplainVersionsPrompt(versions, skillLevel),
       EXPLAIN_VERSIONS_RESPONSE_SCHEMA
     )
@@ -128,7 +149,7 @@ export class GeminiProvider implements AIProvider {
     return responseText ?? ''
   }
 
-  private async generateJson(prompt: string, schema: Schema): Promise<RawCaption[]> {
+  private async generateJson<T>(prompt: string, schema: Schema): Promise<T[]> {
     const responseText = await this.keyPool.call(async (apiKey) => {
       const response = await this.clientFor(apiKey).models.generateContent({
         model: MODEL,

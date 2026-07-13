@@ -20,7 +20,6 @@ interface UseSessionTraceResult {
   events: ToolEvent[]
   notes: AssistantNote[]
   explanations: Map<string, AiExplanation>
-  stepExplanations: Map<string, AiExplanation>
   loading: boolean
 }
 
@@ -35,7 +34,6 @@ export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
   const [events, setEvents] = useState<ToolEvent[]>([])
   const [notes, setNotes] = useState<AssistantNote[]>([])
   const [explanations, setExplanations] = useState<Map<string, AiExplanation>>(new Map())
-  const [stepExplanations, setStepExplanations] = useState<Map<string, AiExplanation>>(new Map())
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -59,7 +57,7 @@ export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
     let cancelled = false
 
     const fetchTrace = async (): Promise<void> => {
-      const [sessionRow, stats, createdIds, promptRows, eventRows, noteRows, explanationRows, stepExplanationRows] =
+      const [sessionRow, stats, createdIds, promptRows, eventRows, noteRows, explanationRows] =
         await Promise.all([
           window.factcoding.getLatestSession(),
           window.factcoding.getMatchStats(sessionId),
@@ -67,8 +65,7 @@ export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
           window.factcoding.getPrompts(sessionId),
           window.factcoding.getToolEvents(sessionId),
           window.factcoding.getAssistantNotes(sessionId),
-          window.factcoding.getExplanations(sessionId, skillLevel),
-          window.factcoding.getStepExplanations(sessionId, skillLevel)
+          window.factcoding.getExplanations(sessionId, skillLevel)
         ])
       if (!cancelled) {
         setSession(sessionRow)
@@ -79,7 +76,6 @@ export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
         setEvents(eventRows)
         setNotes(noteRows)
         setExplanations(new Map(explanationRows.map((row) => [row.target_id, row])))
-        setStepExplanations(new Map(stepExplanationRows.map((row) => [row.target_id, row])))
         setLoading(false)
       }
     }
@@ -102,7 +98,6 @@ export function useSessionTrace(skillLevel: SkillLevel): UseSessionTraceResult {
     events,
     notes,
     explanations,
-    stepExplanations,
     loading
   }
 }

@@ -79,7 +79,7 @@ export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
                 <span className="version-card__caption--pending">요약 생성 중…</span>
               ) : explanation ? (
                 <>
-                  <span>{explanation.content}</span>
+                  <span>{explanation.summary}</span>
                   {parseConceptTags(explanation.concept_tags).map((tag) => (
                     <span key={tag} className="trace-item__tag">
                       {tag}

@@ -20,17 +20,11 @@ import type {
   ToolEvent,
   UnitMatchStat
 } from '@shared/types'
-import type { TtsSettings, TtsUtterance } from '@shared/tts'
+import type { ProgressUpdate } from '@shared/progress'
 import { startPipeline } from '@pipeline/index'
-import { startCaptionWorker } from './caption-worker'
+import { startProgressWorker } from './progress-worker'
 import { startLectureNoteWorker } from './lecture-note-worker'
 import { createContextBundleLoader, createSessionTraceLoader } from './session-trace'
-import {
-  DEFAULT_TTS_VOICE,
-  EdgeTtsService,
-  TTS_MIME_TYPE,
-  type TtsVoiceId
-} from './tts/EdgeTtsService'
 
 loadEnv({ path: join(app.getAppPath(), '.env'), quiet: true })
 
@@ -46,37 +40,15 @@ const db = openDatabase(dbPath)
 applySchema(db, schemaPath)
 
 const aiProvider = createAIProvider()
-const ttsService = new EdgeTtsService()
 
-const getSettingStmt = db.prepare(`SELECT value FROM user_settings WHERE key = @key`)
-const setSettingStmt = db.prepare(`
-  INSERT INTO user_settings (key, value) VALUES (@key, @value)
-  ON CONFLICT(key) DO UPDATE SET value = excluded.value
-`)
-
-function readTtsEnabled(): boolean {
-  const row = getSettingStmt.get({ key: 'tts_enabled' }) as { value: string } | undefined
-  // 기본 on
-  return row?.value !== '0'
-}
-
-function readTtsVoice(): TtsVoiceId {
-  const row = getSettingStmt.get({ key: 'tts_voice' }) as { value: string } | undefined
-  if (row?.value === 'ko-KR-SunHiNeural') return 'ko-KR-SunHiNeural'
-  return DEFAULT_TTS_VOICE
-}
-
-function broadcastUtterance(utterance: TtsUtterance): void {
+function broadcastProgress(update: ProgressUpdate): void {
   for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send('tts:utterance', utterance)
+    win.webContents.send('progress:update', update)
   }
 }
 
-const stopCaptionWorker = startCaptionWorker(db, aiProvider, {
-  tts: ttsService,
-  onUtterance: broadcastUtterance,
-  isTtsEnabled: readTtsEnabled,
-  getTtsVoice: readTtsVoice
+const stopProgressWorker = startProgressWorker(db, aiProvider, {
+  onUpdate: broadcastProgress
 })
 const stopLectureNoteWorker = startLectureNoteWorker(db, aiProvider)
 const loadSessionTrace = createSessionTraceLoader(db)
@@ -196,12 +168,6 @@ const getExplanationsBySession = db.prepare(`
   WHERE ae.target_type = 'tool_event' AND te.session_id = @session_id AND ae.skill_level = @skill_level
 `)
 
-const getStepExplanationsBySession = db.prepare(`
-  SELECT ae.* FROM ai_explanations ae
-  JOIN assistant_notes an ON an.id = ae.target_id
-  WHERE ae.target_type = 'step' AND an.session_id = @session_id AND ae.skill_level = @skill_level
-`)
-
 const getCodeUnitsStmt = db.prepare(`
   SELECT * FROM code_units ORDER BY file_path ASC, unit_name ASC
 `)
@@ -250,10 +216,23 @@ const getCachedExplanationStmt = db.prepare(`
 `)
 
 const upsertExplanationStmt = db.prepare(`
-  INSERT INTO ai_explanations (id, target_type, target_id, skill_level, content, concept_tags, created_at)
-  VALUES (@id, @target_type, @target_id, @skill_level, @content, @concept_tags, @created_at)
+  INSERT INTO ai_explanations (
+    id, target_type, target_id, skill_level, summary,
+    key_code_snippet, key_code_lang, key_code_file, key_code_reason, step_percent,
+    concept_tags, created_at
+  )
+  VALUES (
+    @id, @target_type, @target_id, @skill_level, @summary,
+    @key_code_snippet, @key_code_lang, @key_code_file, @key_code_reason, @step_percent,
+    @concept_tags, @created_at
+  )
   ON CONFLICT(target_type, target_id, skill_level) DO UPDATE SET
-    content = excluded.content,
+    summary = excluded.summary,
+    key_code_snippet = excluded.key_code_snippet,
+    key_code_lang = excluded.key_code_lang,
+    key_code_file = excluded.key_code_file,
+    key_code_reason = excluded.key_code_reason,
+    step_percent = excluded.step_percent,
     concept_tags = excluded.concept_tags,
     created_at = excluded.created_at
 `)
@@ -267,28 +246,6 @@ const insertLectureNoteStmt = db.prepare(`
   INSERT INTO lecture_notes (id, session_id, markdown, skill_level, created_at)
   VALUES (@id, @session_id, @markdown, @skill_level, @created_at)
 `)
-
-async function synthesizeUtterance(
-  id: string,
-  text: string,
-  priority: TtsUtterance['priority'],
-  source: TtsUtterance['source']
-): Promise<TtsUtterance | null> {
-  if (!readTtsEnabled() || !text.trim()) return null
-  try {
-    const buffer = await ttsService.synthesize(text, readTtsVoice())
-    return {
-      id,
-      mimeType: TTS_MIME_TYPE,
-      audioBase64: buffer.toString('base64'),
-      priority,
-      source
-    }
-  } catch (error) {
-    console.error('[tts] synthesize failed:', error)
-    return null
-  }
-}
 
 function registerIpcHandlers(): void {
   ipcMain.handle('db:getLatestSessionId', (): string | null => {
@@ -346,16 +303,6 @@ function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle(
-    'db:getStepExplanations',
-    (_event, sessionId: string, skillLevel: SkillLevel): AiExplanation[] => {
-      return getStepExplanationsBySession.all({
-        session_id: sessionId,
-        skill_level: skillLevel
-      }) as AiExplanation[]
-    }
-  )
-
   ipcMain.handle('db:getCodeUnits', (): CodeUnit[] => {
     return getCodeUnitsStmt.all() as CodeUnit[]
   })
@@ -391,34 +338,6 @@ function registerIpcHandlers(): void {
     setOnboardingCompletedStmt.run()
   })
 
-  ipcMain.handle('tts:getSettings', (): TtsSettings => ({
-    enabled: readTtsEnabled(),
-    voice: readTtsVoice()
-  }))
-
-  ipcMain.handle('tts:setEnabled', (_event, enabled: boolean): void => {
-    setSettingStmt.run({ key: 'tts_enabled', value: enabled ? '1' : '0' })
-  })
-
-  ipcMain.handle('tts:setVoice', (_event, voice: TtsVoiceId): void => {
-    setSettingStmt.run({ key: 'tts_voice', value: voice })
-  })
-
-  ipcMain.handle(
-    'tts:speak',
-    async (
-      _event,
-      payload: { id: string; text: string; priority?: TtsUtterance['priority'] }
-    ): Promise<TtsUtterance | null> => {
-      return synthesizeUtterance(
-        payload.id,
-        payload.text,
-        payload.priority ?? 'high',
-        'version_override'
-      )
-    }
-  )
-
   // SPEC 5.1 항목별 오버라이드: 전역 skill_level을 바꾸지 않고 이 유닛 버전 하나만
   // 다른 난이도로 조회 — ai_explanations 캐시를 먼저 보고, 없으면 온디맨드 생성.
   ipcMain.handle(
@@ -429,14 +348,7 @@ function registerIpcHandlers(): void {
         target_id: versionId,
         skill_level: skillLevel
       }) as AiExplanation | undefined
-      if (cached) {
-        void synthesizeUtterance(versionId, cached.content, 'high', 'version_override').then(
-          (utterance) => {
-            if (utterance) broadcastUtterance(utterance)
-          }
-        )
-        return cached
-      }
+      if (cached) return cached
 
       const version = getVersionByIdStmt.get({ id: versionId }) as
         | CodeUnitVersionWithUnit
@@ -451,17 +363,16 @@ function registerIpcHandlers(): void {
         target_type: 'code_unit_version',
         target_id: versionId,
         skill_level: skillLevel,
-        content: caption.caption,
+        summary: caption.caption,
+        key_code_snippet: null,
+        key_code_lang: null,
+        key_code_file: null,
+        key_code_reason: null,
+        step_percent: null,
         concept_tags: JSON.stringify(caption.conceptTags),
         created_at: new Date().toISOString()
       }
       upsertExplanationStmt.run(row)
-
-      void synthesizeUtterance(versionId, caption.caption, 'high', 'version_override').then(
-        (utterance) => {
-          if (utterance) broadcastUtterance(utterance)
-        }
-      )
 
       return row
     }
@@ -538,9 +449,8 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  stopCaptionWorker()
+  stopProgressWorker()
   stopLectureNoteWorker()
-  ttsService.close()
   pipeline?.stop()
   db.close()
   if (process.platform !== 'darwin') app.quit()

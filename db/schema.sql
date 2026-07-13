@@ -90,13 +90,21 @@ CREATE TABLE IF NOT EXISTS lecture_notes (
 );
 
 -- 난이도별 AI 해설 캐시 (SPEC.md 5.1)
+-- step 행: progress-worker(진행상황 패널)가 채움 — summary/key_code_*/step_percent.
+-- code_unit_version 행: 기존 그대로 summary(캡션 텍스트)+concept_tags만 채우고
+-- key_code_*/step_percent는 null (터틀 진행바 전용 필드라 버전 캡션엔 해당 없음).
 CREATE TABLE IF NOT EXISTS ai_explanations (
   id TEXT PRIMARY KEY,
-  target_type TEXT,         -- tool_event | code_unit_version | qna
+  target_type TEXT,         -- tool_event | code_unit_version | qna | step
   target_id TEXT,
   skill_level TEXT,         -- beginner | intermediate | advanced
-  content TEXT,
-  concept_tags TEXT,        -- JSON 배열, 예: ["디바운스","useEffect"] → Level 3 개념 태그 (SPEC 5장)
+  summary TEXT,             -- 짧은 요약 텍스트
+  key_code_snippet TEXT,    -- 핵심 코드 스니펫 (nullable)
+  key_code_lang TEXT,       -- 코드 언어 (ts, tsx, python 등)
+  key_code_file TEXT,       -- 코드가 위치한 파일 경로
+  key_code_reason TEXT,     -- 왜 지금 이 코드를 보면 좋은지 한 줄
+  step_percent INTEGER,     -- 이 스텝 완료 시점의 누적 퍼센트 (step 행 전용)
+  concept_tags TEXT,        -- JSON 배열, 예: ["디바운스","useEffect"] → Level 3 개념 태그 (SPEC 5장, code_unit_version 전용)
   created_at DATETIME,
   UNIQUE(target_type, target_id, skill_level)
 );

@@ -3,8 +3,8 @@ import type {
   AIProvider,
   BatchCaption,
   ContextBundle,
+  ProgressSummary,
   SessionTrace,
-  StepCaption,
   StepInput,
   VersionCaption
 } from '../types'
@@ -24,18 +24,6 @@ const CHANGE_LABEL: Record<string, string> = {
 function truncateTitle(text: string): string {
   const oneLine = text.replace(/\s+/g, ' ').trim()
   return oneLine.length > 16 ? oneLine.slice(0, 16) + '…' : oneLine
-}
-
-function conceptTagsFromEvents(events: ToolEvent[]): string[] {
-  const tags = new Set<string>()
-  for (const event of events) {
-    if (event.tool_name === 'Bash') tags.add('셸 명령')
-    else if (event.tool_name === 'Read') tags.add('코드 읽기')
-    else if (event.tool_name === 'Edit' || event.tool_name === 'Write') tags.add('코드 수정')
-    else tags.add(event.tool_name)
-    if (tags.size >= 3) break
-  }
-  return [...tags]
 }
 
 // GEMINI_KEY_A/B가 없을 때 배칭 → 캐시 → UI 파이프라인을 네트워크 호출 없이
@@ -63,25 +51,29 @@ export class MockAIProvider implements AIProvider {
     })
   }
 
-  async explainSteps(steps: StepInput[], skillLevel: SkillLevel): Promise<StepCaption[]> {
+  async summarizeProgress(steps: StepInput[], skillLevel: SkillLevel): Promise<ProgressSummary[]> {
     await new Promise((resolve) => setTimeout(resolve, 300))
 
-    // 실제 Gemini 없이도 스텝 그룹핑 → 요약 → 캐시 → UI 경로를 검증하기 위한 결정론적 mock.
+    // 실제 Gemini 없이도 스텝 그룹핑 → 요약 → 캐시 → 진행상황 패널 경로를 검증하기 위한 결정론적 mock.
     return steps.map((step) => {
       const failed = step.events.filter((e) => e.status === 'error').length
-      const failNote = failed > 0 ? ` 실패 ${failed}건을 확인하고 다시 시도했어요.` : ''
-      const firstFile = step.events.find((e) => e.file_path)?.file_path
+      const failNote = failed > 0 ? ` (실패 ${failed}건 재시도)` : ''
+      const editEvent = step.events.find(
+        (e) => (e.tool_name === 'Edit' || e.tool_name === 'Write') && e.file_path
+      )
       return {
         stepId: step.stepId,
-        title: truncateTitle(step.noteText) || '작업 진행',
-        caption:
-          `${TONE_PREFIX[skillLevel]} "${step.noteText.slice(0, 40)}" 목표로 ${step.events.length}개 행동을 묶어 진행했어요.${failNote}`.trim(),
-        why: firstFile
-          ? `${firstFile}을(를) 보면 이 목표가 코드에 어떻게 반영되는지 확인할 수 있어요.`
-          : '이 행동들이 목표를 달성하는 데 필요한 증거예요.',
-        ttsScript:
-          `${TONE_PREFIX[skillLevel]} 지금 에이전트가 ${step.events.length}개 행동을 묶어 목표를 밀어붙이고 있습니다${failNote} 흐름을 잘 지켜보세요`.trim(),
-        conceptTags: conceptTagsFromEvents(step.events)
+        summary: `${TONE_PREFIX[skillLevel]} ${truncateTitle(step.noteText) || '작업 진행'}${failNote}`.trim(),
+        keyCode: editEvent
+          ? {
+              filePath: editEvent.file_path!,
+              lang: editEvent.file_path!.endsWith('.tsx') || editEvent.file_path!.endsWith('.ts')
+                ? 'ts'
+                : 'text',
+              snippet: `// ${editEvent.tool_name} on ${editEvent.file_path}`,
+              reason: '이번 스텝에서 가장 핵심적으로 바뀐 코드예요.'
+            }
+          : null
       }
     })
   }
@@ -108,9 +100,8 @@ export class MockAIProvider implements AIProvider {
       .map((v) => `- **${v.unit_name}** (${v.unit_type}) — ${v.change_type} (v${v.version_no})`)
       .join('\n')
 
-    const stepList = trace.steps
-      .map((s) => `- **${s.title}**: ${s.body}${s.why ? ` (${s.why})` : ''}`)
-      .join('\n')
+    const stepList = trace.steps.map((s) => `- ${s.summary}`).join('\n')
+    const unitTypes = [...new Set(trace.versions.map((v) => v.unit_type))]
 
     return [
       `# 세션 강의노트 ${TONE_PREFIX[skillLevel]}`.trim(),
@@ -118,8 +109,7 @@ export class MockAIProvider implements AIProvider {
       turnList || '(기록된 턴 없음)',
       stepList ? `\n학습 스텝:\n${stepList}` : '',
       '## 핵심 개념',
-      trace.steps.flatMap((s) => s.conceptTags).slice(0, 5).map((t) => `- ${t}`).join('\n') ||
-        '- (태그 없음)',
+      unitTypes.length > 0 ? unitTypes.map((t) => `- ${t}`).join('\n') : '- (다룬 유닛 없음)',
       '## 코드에서 일어난 일',
       versionList || '(변경된 유닛 없음)',
       '## 다시 보면 좋은 포인트',
