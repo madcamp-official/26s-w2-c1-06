@@ -13,6 +13,7 @@ export interface ProgressLogEntry {
   stepId: string
   summary: string
   keyCode: ProgressUpdate['keyCode']
+  errorDetail: string | null
   status: StepStatus
   receivedAt: number
 }
@@ -61,6 +62,7 @@ export function useProgress(): UseProgressResult {
             stepId: update.stepId,
             summary: update.summary,
             keyCode: update.keyCode,
+            errorDetail: update.errorDetail,
             status: update.status,
             receivedAt: Date.now()
           },

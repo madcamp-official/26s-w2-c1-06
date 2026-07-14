@@ -40,8 +40,8 @@ CREATE TABLE IF NOT EXISTS tool_events (
 );
 
 -- 에이전트의 assistant_text 조각 전부(턴당 1개만 살아남는 prompts.plan_text
--- 폴백과 달리 전부 보존). tool_events와 같은 시간축 위에서 "왜 이 행동을
--- 했는지"를 잇는 서사 텍스트로 트레이스 패널이 병합해 보여준다.
+-- 폴백과 달리 전부 보존). 스텝 경계는 아니지만(유휴시간/이벤트 개수 기준),
+-- 그 시간대에 있던 note는 진행 로그 카드의 참고 텍스트로 붙는다.
 CREATE TABLE IF NOT EXISTS assistant_notes (
   id TEXT PRIMARY KEY,
   session_id TEXT REFERENCES sessions(id),
@@ -67,10 +67,12 @@ CREATE TABLE IF NOT EXISTS code_unit_versions (
   diff_text TEXT,
   tool_event_id TEXT REFERENCES tool_events(id),
   prompt_id TEXT REFERENCES prompts(id),
-  step_id TEXT REFERENCES assistant_notes(id),  -- 이 버전을 만든 스텝(=assistant_notes.id).
+  step_id TEXT,              -- 이 버전을 만든 스텝의 id(=그 스텝 첫 tool_event의 id).
+                             -- assistant_notes를 향한 FK가 아님 — 스텝 경계가 note가 아니라
+                             -- 유휴시간/이벤트 개수 기준으로 바뀌면서 note와 무관해졌다.
                              -- pipeline insert 시점엔 스텝 개념이 없어 항상 NULL로 들어오고,
                              -- progress-worker가 매 tick마다 tool_event_id로 역추적해 채운다
-                             -- (구조도 노드 클릭 → 진행상황 카드 연결에 사용, SPEC 패치 v2 #6).
+                             -- (구조도 노드 클릭 → 진행상황 카드 연결에 사용).
   created_at DATETIME,
   UNIQUE(unit_id, version_no)
 );
@@ -103,10 +105,14 @@ CREATE TABLE IF NOT EXISTS ai_explanations (
   target_id TEXT,
   skill_level TEXT,         -- beginner | intermediate | advanced
   summary TEXT,             -- 짧은 요약 텍스트
-  key_code_snippet TEXT,    -- 핵심 코드 스니펫 (nullable)
+  key_code_snippet TEXT,    -- 핵심 코드 스니펫 (nullable) — 결정론적으로 추출된 실제 diff, AI가 만들지 않음
   key_code_lang TEXT,       -- 코드 언어 (ts, tsx, python 등)
   key_code_file TEXT,       -- 코드가 위치한 파일 경로
-  key_code_reason TEXT,     -- 왜 지금 이 코드를 보면 좋은지 한 줄
+  key_code_other_files TEXT,     -- 같은 스텝에서 함께 바뀐 나머지 파일 목록 (JSON 배열)
+  key_code_explanation TEXT,     -- 이 코드가 무엇인지
+  key_code_importance TEXT,      -- 이 코드가 중요한 이유
+  key_code_application TEXT,     -- 이 코드로 배우는 점(학습 포인트)
+  error_detail TEXT,        -- 실패 스텝의 원본 에러 메시지(요약 없이 truncate만, step 행 전용)
   step_percent INTEGER,     -- 이 스텝 완료 시점의 누적 퍼센트 (step 행 전용)
   status TEXT DEFAULT 'success',  -- success | failed (step 행 전용). 스텝에 속한 tool_event 중
                              -- 하나라도 error가 있으면 failed — progress-worker가 로컬 계산

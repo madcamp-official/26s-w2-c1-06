@@ -8,6 +8,7 @@ import type {
   SkillLevel,
   ToolEvent
 } from '@shared/types'
+import type { QuizLesson } from '@shared/quiz'
 
 export interface BatchCaption {
   toolEventId: string
@@ -21,25 +22,41 @@ export interface VersionCaption {
   conceptTags: string[]
 }
 
-// 학습 파이프라인 4단계: 스텝(에이전트 의도 1개 + 그 안 액션들) 단위 요약.
+// 학습 파이프라인 4단계: 스텝(유휴시간/개수로 나뉜 이벤트 묶음) 단위 요약.
+// noteText는 이제 스텝 경계가 아니라 우연히 그 시간대에 있던 참고 텍스트라 optional.
+// codeCandidate는 progress-worker가 이미 결정론적으로 뽑아둔 대표 diff — AI는 이걸
+// 보고 설명만 채우지, 코드 자체를 새로 만들어내지 않는다.
 export interface StepInput {
   stepId: string
-  noteText: string
+  noteText: string | null
   events: ToolEvent[]
+  codeCandidate: { filePath: string; lang: string; snippet: string; otherFiles: string[] } | null
 }
 
 // 진행상황 패널(거북이 로딩바) 전용 — 스텝 완료 시 생성되는 초단문 요약 + 핵심 코드.
+// filePath/lang/snippet은 AI가 아니라 progress-worker가 결정론적으로 채운 뒤 병합한다.
 export interface KeyCode {
   filePath: string
   lang: string
   snippet: string
-  reason: string
+  otherFiles: string[]
+  explanation: string
+  importance: string
+  application: string
+}
+
+// AIProvider.summarizeProgress가 실제로 채우는 부분 — 이미 주어진 codeCandidate에
+// 대한 설명 3필드만. filePath/lang/snippet/otherFiles는 여기 없다(AI 책임 아님).
+export interface KeyCodeExplanation {
+  explanation: string
+  importance: string
+  application: string
 }
 
 export interface ProgressSummary {
   stepId: string
   summary: string
-  keyCode: KeyCode | null
+  keyCode: KeyCodeExplanation | null
 }
 
 // 강의노트에 넣을 학습 스텝 요약(도구 나열 대신 탑다운 서사 우선).
@@ -75,4 +92,7 @@ export interface AIProvider {
   ): Promise<VersionCaption[]>
   synthesizeLectureNote(trace: SessionTrace, skillLevel: SkillLevel): Promise<string>
   answerQuestion(question: string, context: ContextBundle, skillLevel: SkillLevel): Promise<string>
+  // 복습 퀴즈(SPEC 패치 v3): 세션에서 실제로 바뀐 코드 유닛마다 학습 카드(1분 학습 +
+  // 문항 6개, 문항당 10초) 하나씩 생성.
+  generateQuiz(versions: CodeUnitVersionWithUnit[], skillLevel: SkillLevel): Promise<QuizLesson[]>
 }

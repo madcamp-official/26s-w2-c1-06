@@ -13,18 +13,8 @@ function truncate(text: string, max: number): string {
 // "Bash를 실행했다" 대신 "npm install better-sqlite3를 실행했다"처럼 구체적인 캡션이
 // 나오게 하는 핵심 근거. 파싱 실패/미지원 도구는 조용히 null(도구 이름만으로 설명).
 function summarizeRawPayload(toolName: string, rawPayload: string | null): string | null {
-  if (!rawPayload) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(rawPayload)
-  } catch {
-    return null
-  }
-  if (!parsed || typeof parsed !== 'object') return null
-
-  const input = (parsed as { input?: unknown }).input
-  if (!input || typeof input !== 'object') return null
-  const rec = input as Record<string, unknown>
+  const rec = parseToolInput(rawPayload)
+  if (!rec) return null
 
   const field = (key: string, max: number): string | null => {
     const value = rec[key]
@@ -55,6 +45,56 @@ function summarizeRawPayload(toolName: string, rawPayload: string | null): strin
     default:
       return null
   }
+}
+
+function parseToolInput(rawPayload: string | null): Record<string, unknown> | null {
+  if (!rawPayload) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawPayload)
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object') return null
+  const input = (parsed as { input?: unknown }).input
+  if (!input || typeof input !== 'object') return null
+  return input as Record<string, unknown>
+}
+
+const DIFF_LINE_MAX_LENGTH = 80
+
+function toDiffLines(text: string, marker: '+' | '-', max: number): string[] {
+  return text
+    .split('\n')
+    .slice(0, max)
+    .map((line) => `${marker} ${truncate(line, DIFF_LINE_MAX_LENGTH)}`)
+}
+
+// Edit/Write 이벤트의 raw_payload(old_string/new_string 또는 content)를 그대로
+// "- "/"+ " 접두사 줄로 나눈다. progressSummaryPrompt의 keyCode.snippet에 쓸
+// 실제 데이터 기반 diff — Gemini/Mock 둘 다 재사용해 snippet이 추측이 아니라
+// 세션에서 실제로 바뀐 텍스트를 보여주게 한다.
+export function extractDiffSnippetLines(event: ToolEvent, maxLinesPerSide = 3): string[] | null {
+  const input = parseToolInput(event.raw_payload)
+  if (!input) return null
+
+  if (event.tool_name === 'Edit') {
+    const oldString = input.old_string
+    const newString = input.new_string
+    if (typeof oldString !== 'string' && typeof newString !== 'string') return null
+    return [
+      ...(typeof oldString === 'string' ? toDiffLines(oldString, '-', maxLinesPerSide) : []),
+      ...(typeof newString === 'string' ? toDiffLines(newString, '+', maxLinesPerSide) : [])
+    ]
+  }
+
+  if (event.tool_name === 'Write') {
+    const content = input.content
+    if (typeof content !== 'string') return null
+    return toDiffLines(content, '+', maxLinesPerSide * 2)
+  }
+
+  return null
 }
 
 // 같은 턴(prompt_id) 안에서 이 이벤트보다 먼저 온 assistant_notes 중 가장 최근 것을

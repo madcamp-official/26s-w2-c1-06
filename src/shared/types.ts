@@ -113,11 +113,16 @@ export interface AiExplanation {
   // 짧은 요약 텍스트. step 행: progress-worker가 채우는 진행상황 요약.
   // code_unit_version 행: 기존 그대로 "무엇이 왜 바뀌었는지" 캡션.
   summary: string
-  // 아래 4개는 step 행에만 채워짐(진행상황 패널의 "핵심 코드" 카드) — code_unit_version 행은 전부 null.
+  // 아래는 step 행에만 채워짐(진행상황 패널의 "핵심 코드" 카드) — code_unit_version 행은 전부 null.
   key_code_snippet: string | null
   key_code_lang: string | null
   key_code_file: string | null
-  key_code_reason: string | null
+  key_code_other_files: string | null // JSON 배열 문자열
+  key_code_explanation: string | null
+  key_code_importance: string | null
+  key_code_application: string | null
+  // 실패 스텝의 원본 에러 메시지(truncate만, AI 생성 아님). step 행 전용.
+  error_detail: string | null
   // step 행에만 채워짐: 이 스텝 완료 시점의 누적 퍼센트(0~100). code_unit_version 행은 null.
   step_percent: number | null
   // success | failed. step 행 전용 — 스텝에 속한 tool_event 중 error가 하나라도 있으면 failed.

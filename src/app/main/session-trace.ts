@@ -31,11 +31,13 @@ export function createSessionTraceLoader(
     SELECT * FROM assistant_notes WHERE session_id = @session_id ORDER BY created_at ASC, rowid ASC
   `)
 
+  // step 행의 target_id는 이제 assistant_notes.id가 아니라 그 스텝 첫 tool_event의
+  // id이므로 tool_events로 JOIN한다(예전엔 assistant_notes로 JOIN했음).
   const getStepExplanations = db.prepare(`
     SELECT ae.*
     FROM ai_explanations ae
-    JOIN assistant_notes an ON an.id = ae.target_id
-    WHERE ae.target_type = 'step' AND an.session_id = @session_id
+    JOIN tool_events te ON te.id = ae.target_id
+    WHERE ae.target_type = 'step' AND te.session_id = @session_id
   `)
 
   const getVersions = db.prepare(`
@@ -58,9 +60,9 @@ export function createSessionTraceLoader(
     const byId = new Map(explanations.map((e) => [e.target_id, e]))
 
     const steps: StepSummaryForNote[] = groupIntoSteps(notes, events)
-      .filter((step) => step.id !== null && step.events.length > 0)
+      .filter((step) => step.events.length > 0)
       .map((step) => {
-        const explanation = byId.get(step.id!)
+        const explanation = byId.get(step.id)
         // 요약 없으면 note 앞부분으로 최소 서사라도 넣는다.
         return { summary: explanation?.summary || step.note?.text?.slice(0, 200) || '' }
       })

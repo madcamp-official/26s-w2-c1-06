@@ -2,8 +2,11 @@
 export interface ProgressKeyCode {
   filePath: string
   lang: string
-  snippet: string
-  reason: string
+  snippet: string // 결정론적으로 추출된 실제 diff — AI가 만들지 않음
+  otherFiles: string[] // 같은 스텝에서 함께 바뀐 나머지 파일(있으면)
+  explanation: string // 이 코드가 무엇인지
+  importance: string // 이 코드가 중요한 이유
+  application: string // 이 코드로 배우는 점(학습 포인트)
 }
 
 export type StepStatus = 'success' | 'failed'
@@ -14,6 +17,7 @@ export interface ProgressUpdate {
   delta: number
   summary: string
   keyCode: ProgressKeyCode | null
+  errorDetail: string | null // 실패 스텝의 원본 에러 메시지(요약/truncate만, AI 생성 아님)
   cycleId: string
   status: StepStatus
   cycleNumber: number   // 1부터 시작, 사이클(CYCLE_SIZE 스텝) 롤오버마다 +1
@@ -25,6 +29,7 @@ export interface ProgressLogEntry {
   stepId: string
   summary: string
   keyCode: ProgressKeyCode | null
+  errorDetail: string | null
   status: StepStatus
 }
 

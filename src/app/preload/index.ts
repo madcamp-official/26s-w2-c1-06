@@ -14,6 +14,7 @@ import type {
   UnitMatchStat
 } from '@shared/types'
 import type { LiveStatus, ProgressState, ProgressUpdate } from '@shared/progress'
+import type { QuizLesson } from '@shared/quiz'
 
 const factcodingApi = {
   getLatestSessionId: (): Promise<string | null> => ipcRenderer.invoke('db:getLatestSessionId'),
@@ -50,6 +51,8 @@ const factcodingApi = {
     ipcRenderer.invoke('db:regenerateLectureNote', sessionId, skillLevel),
   answerQuestion: (sessionId: string, question: string, skillLevel: SkillLevel): Promise<string> =>
     ipcRenderer.invoke('db:answerQuestion', sessionId, question, skillLevel),
+  generateQuiz: (sessionId: string, skillLevel: SkillLevel): Promise<QuizLesson[]> =>
+    ipcRenderer.invoke('db:generateQuiz', sessionId, skillLevel),
 
   onProgressUpdate: (callback: (update: ProgressUpdate) => void): (() => void) => {
     const listener = (_event: IpcRendererEvent, update: ProgressUpdate): void => {

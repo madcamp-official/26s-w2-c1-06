@@ -4,6 +4,11 @@ import { GeminiProvider } from './gemini-provider/GeminiProvider'
 import { MockAIProvider } from './mock-provider/MockAIProvider'
 
 export function createAIProvider(): AIProvider {
+  if (process.env.DISABLE_GEMINI === 'true') {
+    console.warn('[ai] DISABLE_GEMINI=true — using MockAIProvider, no network calls made')
+    return new MockAIProvider()
+  }
+
   const keys = [process.env.GEMINI_KEY_A, process.env.GEMINI_KEY_B].filter(
     (key): key is string => Boolean(key)
   )

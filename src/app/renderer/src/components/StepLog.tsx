@@ -17,6 +17,23 @@ function truncateLines(text: string, max: number): string {
   return lines.slice(0, max).join('\n') + '\n…'
 }
 
+// "- "/"+ " 로 시작하는 줄만 diff 라인으로 색칠한다 — CSS `--custom-property`나
+// Bash `--flag`처럼 실제 코드가 -/+로 시작하는 경우와 헷갈리지 않도록 마커 뒤
+// 공백까지 확인한다.
+function renderDiffLines(text: string) {
+  return text.split('\n').map((line, i) => {
+    const match = line.match(/^([+-]) (.*)$/)
+    const className = match
+      ? `diff-line ${match[1] === '+' ? 'diff-line--add' : 'diff-line--remove'}`
+      : 'diff-line'
+    return (
+      <span key={i} className={className}>
+        {match ? match[2] : line}
+      </span>
+    )
+  })
+}
+
 // 거북이 진행바 옆에 붙는 로그 — 방금 한 일 한 줄 + (있으면) 지금 봐두면 좋은
 // 핵심 코드. 길게 설명하지 않는다: 카드 하나는 항상 짧아야 한다(SPEC 주의사항).
 export function StepLog({ history, highlightStepId }: StepLogProps) {
@@ -73,13 +90,29 @@ export function StepLog({ history, highlightStepId }: StepLogProps) {
             </p>
             {entry.keyCode && (
               <div className="step-log__keycode">
-                <div className="step-log__keycode-file">{entry.keyCode.filePath}</div>
+                <div className="step-log__keycode-file">
+                  {entry.keyCode.filePath}
+                  {entry.keyCode.otherFiles.length > 0 && (
+                    <span className="step-log__other-files">
+                      {' '}
+                      외 {entry.keyCode.otherFiles.length}개 파일 변경
+                    </span>
+                  )}
+                </div>
                 <pre className="step-log__snippet">
-                  <code>{truncateLines(entry.keyCode.snippet, 5)}</code>
+                  <code>{renderDiffLines(truncateLines(entry.keyCode.snippet, 5))}</code>
                 </pre>
-                <p className="step-log__reason">{entry.keyCode.reason}</p>
+                <dl className="step-log__explain">
+                  <dt>설명</dt>
+                  <dd>{entry.keyCode.explanation}</dd>
+                  <dt>중요한 이유</dt>
+                  <dd>{entry.keyCode.importance}</dd>
+                  <dt>학습 포인트</dt>
+                  <dd>{entry.keyCode.application}</dd>
+                </dl>
               </div>
             )}
+            {entry.errorDetail && <pre className="step-log__error">{entry.errorDetail}</pre>}
           </li>
         ))}
       </ul>

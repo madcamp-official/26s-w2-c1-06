@@ -22,3 +22,7 @@ export function parseConceptTags(json: string | null): string[] {
 export function truncateText(text: string, max: number): string {
   return text.length > max ? text.slice(0, max) + '…' : text
 }
+
+export function capitalize(text: string): string {
+  return text.length === 0 ? text : text[0].toUpperCase() + text.slice(1)
+}

@@ -21,6 +21,7 @@ import type {
   UnitMatchStat
 } from '@shared/types'
 import type { LiveStatus, ProgressState, ProgressUpdate } from '@shared/progress'
+import type { QuizLesson } from '@shared/quiz'
 import { startPipeline } from '@pipeline/index'
 import { startProgressWorker } from './progress-worker'
 import { startLectureNoteWorker } from './lecture-note-worker'
@@ -215,6 +216,20 @@ const setOnboardingCompletedStmt = db.prepare(`
   ON CONFLICT(key) DO UPDATE SET value = excluded.value
 `)
 
+// 복습 퀴즈 소재: 이 세션에서 실제로 바뀐 코드 유닛 최근 순 N개. getMatchStatsStmt의
+// created 서브쿼리와 동일한 join 패턴(tool_event 경유/prompt 직결 양쪽 다 커버)을 쓴다.
+const QUIZ_VERSION_LIMIT = 8
+const getRecentVersionsForQuizStmt = db.prepare(`
+  SELECT v.*, u.unit_name, u.unit_type, u.file_path
+  FROM code_unit_versions v
+  JOIN code_units u ON u.id = v.unit_id
+  LEFT JOIN tool_events te ON te.id = v.tool_event_id
+  LEFT JOIN prompts p ON p.id = v.prompt_id
+  WHERE te.session_id = @session_id OR p.session_id = @session_id
+  ORDER BY v.created_at DESC
+  LIMIT ${QUIZ_VERSION_LIMIT}
+`)
+
 const getVersionByIdStmt = db.prepare(`
   SELECT v.*, u.unit_name, u.unit_type, u.file_path
   FROM code_unit_versions v
@@ -235,7 +250,9 @@ const getCachedExplanationStmt = db.prepare(`
 // 별도 IPC 없이 순수 클라이언트 렌더링만으로 펼치기가 동작한다.
 const PROGRESS_HISTORY_LIMIT = 100
 const getRecentStepProgressStmt = db.prepare(`
-  SELECT target_id, summary, key_code_snippet, key_code_lang, key_code_file, key_code_reason, step_percent, status
+  SELECT target_id, summary, key_code_snippet, key_code_lang, key_code_file, key_code_other_files,
+         key_code_explanation, key_code_importance, key_code_application, error_detail,
+         step_percent, status
   FROM ai_explanations
   WHERE target_type = 'step' AND step_percent IS NOT NULL
   ORDER BY created_at DESC
@@ -245,20 +262,26 @@ const getRecentStepProgressStmt = db.prepare(`
 const upsertExplanationStmt = db.prepare(`
   INSERT INTO ai_explanations (
     id, target_type, target_id, skill_level, summary,
-    key_code_snippet, key_code_lang, key_code_file, key_code_reason, step_percent,
-    status, concept_tags, created_at
+    key_code_snippet, key_code_lang, key_code_file, key_code_other_files,
+    key_code_explanation, key_code_importance, key_code_application,
+    error_detail, step_percent, status, concept_tags, created_at
   )
   VALUES (
     @id, @target_type, @target_id, @skill_level, @summary,
-    @key_code_snippet, @key_code_lang, @key_code_file, @key_code_reason, @step_percent,
-    @status, @concept_tags, @created_at
+    @key_code_snippet, @key_code_lang, @key_code_file, @key_code_other_files,
+    @key_code_explanation, @key_code_importance, @key_code_application,
+    @error_detail, @step_percent, @status, @concept_tags, @created_at
   )
   ON CONFLICT(target_type, target_id, skill_level) DO UPDATE SET
     summary = excluded.summary,
     key_code_snippet = excluded.key_code_snippet,
     key_code_lang = excluded.key_code_lang,
     key_code_file = excluded.key_code_file,
-    key_code_reason = excluded.key_code_reason,
+    key_code_other_files = excluded.key_code_other_files,
+    key_code_explanation = excluded.key_code_explanation,
+    key_code_importance = excluded.key_code_importance,
+    key_code_application = excluded.key_code_application,
+    error_detail = excluded.error_detail,
     step_percent = excluded.step_percent,
     status = excluded.status,
     concept_tags = excluded.concept_tags,
@@ -301,7 +324,11 @@ function registerIpcHandlers(): void {
       key_code_snippet: string | null
       key_code_lang: string | null
       key_code_file: string | null
-      key_code_reason: string | null
+      key_code_other_files: string | null
+      key_code_explanation: string | null
+      key_code_importance: string | null
+      key_code_application: string | null
+      error_detail: string | null
       step_percent: number
       status: 'success' | 'failed' | null
     }[]
@@ -311,14 +338,19 @@ function registerIpcHandlers(): void {
         stepId: row.target_id,
         summary: row.summary,
         keyCode:
-          row.key_code_snippet && row.key_code_lang && row.key_code_file && row.key_code_reason
+          row.key_code_snippet && row.key_code_lang && row.key_code_file &&
+          row.key_code_explanation && row.key_code_importance && row.key_code_application
             ? {
                 snippet: row.key_code_snippet,
                 lang: row.key_code_lang,
                 filePath: row.key_code_file,
-                reason: row.key_code_reason
+                otherFiles: row.key_code_other_files ? JSON.parse(row.key_code_other_files) : [],
+                explanation: row.key_code_explanation,
+                importance: row.key_code_importance,
+                application: row.key_code_application
               }
             : null,
+        errorDetail: row.error_detail,
         status: row.status ?? 'success'
       }))
     }
@@ -432,7 +464,11 @@ function registerIpcHandlers(): void {
         key_code_snippet: null,
         key_code_lang: null,
         key_code_file: null,
-        key_code_reason: null,
+        key_code_other_files: null,
+        key_code_explanation: null,
+        key_code_importance: null,
+        key_code_application: null,
+        error_detail: null,
         step_percent: null,
         status: 'success',
         concept_tags: JSON.stringify(caption.conceptTags),
@@ -475,6 +511,19 @@ function registerIpcHandlers(): void {
       const context = loadContextBundle(sessionId)
       if (!context) return '세션 정보를 찾을 수 없습니다.'
       return aiProvider.answerQuestion(question, context, skillLevel)
+    }
+  )
+
+  // useQna와 같은 이유로 캐시하지 않는다(SPEC 패치 v3) — 매번 새로 생성해야 "같은 문제
+  // 반복" 없이 게임성이 유지된다. 바뀐 코드가 없으면 빈 배열(렌더러가 안내 문구 표시).
+  ipcMain.handle(
+    'db:generateQuiz',
+    async (_event, sessionId: string, skillLevel: SkillLevel): Promise<QuizLesson[]> => {
+      const versions = getRecentVersionsForQuizStmt.all({
+        session_id: sessionId
+      }) as CodeUnitVersionWithUnit[]
+      if (versions.length === 0) return []
+      return aiProvider.generateQuiz(versions, skillLevel)
     }
   )
 }

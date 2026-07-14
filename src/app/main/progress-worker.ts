@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import type { AIProvider, StepInput } from '@ai/types'
+import { extractDiffSnippetLines } from '@ai/prompt-templates/explainBatchPrompt'
 import type { AssistantNote, CodeUnitVersionWithUnit, SkillLevel, ToolEvent } from '@shared/types'
 import { groupIntoSteps, type Step } from '@shared/steps'
-import type { LiveStatus, ProgressUpdate, StepStatus } from '@shared/progress'
+import type { LiveStatus, ProgressKeyCode, ProgressUpdate, StepStatus } from '@shared/progress'
 
-// 학습 파이프라인 4단계: 낱개 tool_event가 아니라 "스텝"(에이전트 의도 1개 +
-// 그 안의 액션들)을 요약한다. 한 스텝을 배치로 여러 개 처리하되 틱당 provider
-// 호출은 1회로 제한(RPM 방어).
+// 학습 파이프라인 4단계: 낱개 tool_event가 아니라 "스텝"(유휴시간/개수로 나뉜 이벤트
+// 묶음)을 요약한다. 한 스텝을 배치로 여러 개 처리하되 틱당 provider 호출은 1회로
+// 제한(RPM 방어).
 const STEP_BATCH_SIZE = 3
 const VERSION_BATCH_SIZE = 5
 const POLL_INTERVAL_MS = 5000
@@ -24,11 +25,14 @@ const LIVE_STATUS_POLL_INTERVAL_MS = 1500
 // 결정되고, Gemini/폴백 텍스트는 각 스텝의 summary/keyCode 내용만 채운다.
 const CYCLE_SIZE = 8
 
+const ERROR_DETAIL_MAX_LENGTH = 200
+
 interface CaptionRow {
   targetType: 'step' | 'code_unit_version'
   targetId: string
   summary: string
-  keyCode: { filePath: string; lang: string; snippet: string; reason: string } | null
+  keyCode: ProgressKeyCode | null
+  errorDetail: string | null
   stepPercent: number | null
   status: StepStatus
   conceptTags: string[]
@@ -57,6 +61,62 @@ function fallbackSummaryFromNote(noteText: string | null | undefined): string {
   const cleaned = (noteText ?? '').replace(/\s+/g, ' ').trim()
   if (!cleaned) return '작업을 진행했어요'
   return cleaned.length > 40 ? cleaned.slice(0, 40) + '…' : cleaned
+}
+
+function langFor(filePath: string): string {
+  return filePath.endsWith('.tsx') || filePath.endsWith('.ts') ? 'ts' : 'text'
+}
+
+// 스텝에 속한 실패 이벤트의 원본 에러 메시지를 그대로(요약 없이) 잘라서 보여준다 —
+// AI가 만드는 게 아니라 실제 result_content를 그대로 노출(TracePanel이 없어지며
+// 빠지는 "에러 원문" 정보를 이 카드가 대신 들고 있게 함).
+function errorDetailOf(events: ToolEvent[]): string | null {
+  const failed = events.find((e) => e.status === 'error' && e.result_content)
+  if (!failed?.result_content) return null
+  const text = failed.result_content
+  return text.length > ERROR_DETAIL_MAX_LENGTH ? text.slice(0, ERROR_DETAIL_MAX_LENGTH) + '…' : text
+}
+
+interface CodeCandidate {
+  filePath: string
+  lang: string
+  snippet: string
+  otherFiles: string[]
+}
+
+// 스텝 안에서 "지금 보여줄 대표 코드"를 결정론적으로 고른다. 첫 번째로 눈에 띈
+// Edit/Write를 무조건 고르면(예전 로직) 스크래치/임시 파일이 먼저 만들어졌을 때
+// 그게 잘못 뽑힌다 — src/ 하위 실제 소스를 우선하고, 그 안에서 가장 마지막
+// (최종 상태) 것을 고른다. diff 추출이 실패하는 후보는 건너뛰고 다음으로 넘어간다.
+function pickCodeCandidate(events: ToolEvent[]): CodeCandidate | null {
+  const codeEvents = events.filter(
+    (e) => (e.tool_name === 'Edit' || e.tool_name === 'Write') && e.file_path
+  )
+  if (codeEvents.length === 0) return null
+
+  const preferred = codeEvents.filter((e) => e.file_path!.startsWith('src/'))
+  const ordered = [...(preferred.length > 0 ? preferred : codeEvents)].reverse()
+
+  for (const candidate of ordered) {
+    const lines = extractDiffSnippetLines(candidate)
+    if (!lines || lines.length === 0) continue
+
+    const otherFiles = [
+      ...new Set(
+        codeEvents
+          .filter((e) => e.file_path !== candidate.file_path)
+          .map((e) => e.file_path!)
+      )
+    ]
+
+    return {
+      filePath: candidate.file_path!,
+      lang: langFor(candidate.file_path!),
+      snippet: lines.join('\n'),
+      otherFiles
+    }
+  }
+  return null
 }
 
 export interface ProgressWorkerHandle {
@@ -109,20 +169,26 @@ export function startProgressWorker(
   const upsertExplanation = db.prepare(`
     INSERT INTO ai_explanations (
       id, target_type, target_id, skill_level, summary,
-      key_code_snippet, key_code_lang, key_code_file, key_code_reason, step_percent,
-      status, concept_tags, created_at
+      key_code_snippet, key_code_lang, key_code_file, key_code_other_files,
+      key_code_explanation, key_code_importance, key_code_application,
+      error_detail, step_percent, status, concept_tags, created_at
     )
     VALUES (
       @id, @target_type, @target_id, @skill_level, @summary,
-      @key_code_snippet, @key_code_lang, @key_code_file, @key_code_reason, @step_percent,
-      @status, @concept_tags, @created_at
+      @key_code_snippet, @key_code_lang, @key_code_file, @key_code_other_files,
+      @key_code_explanation, @key_code_importance, @key_code_application,
+      @error_detail, @step_percent, @status, @concept_tags, @created_at
     )
     ON CONFLICT(target_type, target_id, skill_level) DO UPDATE SET
       summary = excluded.summary,
       key_code_snippet = excluded.key_code_snippet,
       key_code_lang = excluded.key_code_lang,
       key_code_file = excluded.key_code_file,
-      key_code_reason = excluded.key_code_reason,
+      key_code_other_files = excluded.key_code_other_files,
+      key_code_explanation = excluded.key_code_explanation,
+      key_code_importance = excluded.key_code_importance,
+      key_code_application = excluded.key_code_application,
+      error_detail = excluded.error_detail,
       step_percent = excluded.step_percent,
       status = excluded.status,
       concept_tags = excluded.concept_tags,
@@ -141,7 +207,11 @@ export function startProgressWorker(
         key_code_snippet: row.keyCode?.snippet ?? null,
         key_code_lang: row.keyCode?.lang ?? null,
         key_code_file: row.keyCode?.filePath ?? null,
-        key_code_reason: row.keyCode?.reason ?? null,
+        key_code_other_files: row.keyCode ? JSON.stringify(row.keyCode.otherFiles) : null,
+        key_code_explanation: row.keyCode?.explanation ?? null,
+        key_code_importance: row.keyCode?.importance ?? null,
+        key_code_application: row.keyCode?.application ?? null,
+        error_detail: row.errorDetail,
         step_percent: row.stepPercent,
         status: row.status,
         concept_tags: JSON.stringify(row.conceptTags),
@@ -152,7 +222,8 @@ export function startProgressWorker(
 
   // code_unit_versions.step_id 백필: pipeline(Person A)은 스텝 개념을 모르고 삽입하므로,
   // 이미 events → step 매핑을 계산한 이 워커가 tool_event_id로 역추적해 채운다
-  // (구조도 노드 클릭 → 진행상황 카드 스크롤 연결에 사용, SPEC 패치 v2 #6).
+  // (구조도 노드 클릭 → 진행상황 카드 스크롤 연결에 사용). step_id는 이제 note id가
+  // 아니라 그 스텝의 첫 이벤트 id — assistant_notes를 향한 FK는 스키마에서 제거됨.
   const hasUnbackfilledVersions = db.prepare(
     `SELECT 1 FROM code_unit_versions WHERE step_id IS NULL AND tool_event_id IS NOT NULL LIMIT 1`
   )
@@ -161,7 +232,6 @@ export function startProgressWorker(
   )
   const backfillVersionStepIds = db.transaction((steps: Step[]) => {
     for (const step of steps) {
-      if (!step.id) continue
       for (const event of step.events) {
         backfillStepIdForEvent.run({ step_id: step.id, tool_event_id: event.id })
       }
@@ -184,7 +254,8 @@ export function startProgressWorker(
   const emitProgress = (
     stepId: string,
     summary: string,
-    keyCode: CaptionRow['keyCode'],
+    keyCode: ProgressKeyCode | null,
+    errorDetail: string | null,
     status: StepStatus
   ): { percent: number; cycleNumber: number; stepsInCycle: number } | null => {
     if (!options.onUpdate) return null
@@ -204,6 +275,7 @@ export function startProgressWorker(
       delta,
       summary,
       keyCode,
+      errorDetail,
       cycleId: thisCycleId,
       status,
       cycleNumber: thisCycleNumber,
@@ -221,6 +293,23 @@ export function startProgressWorker(
     return { percent, cycleNumber: thisCycleNumber, stepsInCycle: thisStepsInCycle }
   }
 
+  // Gemini가 아직 답하지 않은 스텝도 코드는 결정론적으로 뽑을 수 있으니, 설명
+  // 3필드만 규칙 기반 문구로 채운 로컬 폴백 keyCode를 만든다 — 진행 로그가 유일한
+  // 화면이 된 이상 "코드가 아예 안 보이는" 카드가 나오면 안 된다.
+  function localKeyCodeFallback(step: Step, status: StepStatus): ProgressKeyCode | null {
+    const candidate = pickCodeCandidate(step.events)
+    if (!candidate) return null
+    return {
+      ...candidate,
+      explanation: `${candidate.filePath}에서 코드가 바뀌었어요.`,
+      importance:
+        status === 'failed'
+          ? '이 부분이 방금 실패의 원인이 된 지점이에요.'
+          : '앞으로 이 코드 형태를 다른 곳에서도 다시 쓰게 되니 기억해두세요.',
+      application: '비슷한 변경을 할 때 이 코드 형태를 참고해보세요.'
+    }
+  }
+
   const processCachedOrFallback = (
     steps: Step[],
     inProgress: Step | null,
@@ -230,12 +319,14 @@ export function startProgressWorker(
     let processed = 0
     for (const step of steps) {
       if (processed >= limit) break
-      if (!step.id || step === inProgress || step.events.length === 0) continue
+      if (step === inProgress || step.events.length === 0) continue
       if (processedStepIds.has(step.id)) continue
 
       const row = db
         .prepare(
-          `SELECT summary, key_code_snippet, key_code_lang, key_code_file, key_code_reason, step_percent
+          `SELECT summary, key_code_snippet, key_code_lang, key_code_file, key_code_other_files,
+                  key_code_explanation, key_code_importance, key_code_application,
+                  error_detail, step_percent
            FROM ai_explanations WHERE target_type = 'step' AND target_id = @target_id AND skill_level = @skill_level`
         )
         .get({ target_id: step.id, skill_level: skillLevel }) as
@@ -244,7 +335,11 @@ export function startProgressWorker(
             key_code_snippet: string | null
             key_code_lang: string | null
             key_code_file: string | null
-            key_code_reason: string | null
+            key_code_other_files: string | null
+            key_code_explanation: string | null
+            key_code_importance: string | null
+            key_code_application: string | null
+            error_detail: string | null
             step_percent: number | null
           }
         | undefined
@@ -261,12 +356,14 @@ export function startProgressWorker(
       }
 
       // 위에서 step_percent가 있는 행은 이미 continue했으므로, 여기 도달했다는 건
-      // row가 아예 없다는 뜻(한 번도 처리된 적 없는 스텝) — note 기반 폴백 요약을 쓴다.
-      // status는 AI 없이도 tool_event 결과만으로 결정론적으로 계산 가능하므로 Gemini
-      // 성공/실패와 무관하게 항상 로컬로 판정한다.
+      // row가 아예 없다는 뜻(한 번도 처리된 적 없는 스텝) — note 기반 폴백 요약 +
+      // 결정론적으로 뽑은 코드를 함께 쓴다. status는 AI 없이도 tool_event 결과만으로
+      // 결정론적으로 계산 가능하므로 Gemini 성공/실패와 무관하게 항상 로컬로 판정한다.
       const summary = fallbackSummaryFromNote(step.note?.text)
       const status = stepStatusOf(step)
-      const result = emitProgress(step.id, summary, null, status)
+      const keyCode = localKeyCodeFallback(step, status)
+      const errorDetail = errorDetailOf(step.events)
+      const result = emitProgress(step.id, summary, keyCode, errorDetail, status)
       // 폴백도 Gemini 성공 경로와 동일하게 DB에 남겨야, 다음 재시작 때 이미 카운트된
       // 스텝으로 인식돼(위 step_percent 체크) 또 세지 않는다 — 안 남기면 Gemini가
       // 끝내 이 스텝을 못 봐도(예: 세션 종료) 재시작마다 중복 카운트가 반복된다.
@@ -277,7 +374,8 @@ export function startProgressWorker(
               targetType: 'step',
               targetId: step.id,
               summary,
-              keyCode: null,
+              keyCode,
+              errorDetail,
               stepPercent: result.percent,
               status,
               conceptTags: []
@@ -320,12 +418,7 @@ export function startProgressWorker(
 
       const eligible = steps
         .filter(
-          (step) =>
-            step.id !== null &&
-            step.note !== null &&
-            step.events.length > 0 &&
-            step !== inProgress &&
-            !summarized.has(step.id)
+          (step) => step.events.length > 0 && step !== inProgress && !summarized.has(step.id)
         )
         .slice(0, STEP_BATCH_SIZE)
 
@@ -335,10 +428,12 @@ export function startProgressWorker(
       if (eligible.length > 0 && geminiReady) {
         try {
           const stepInputs: StepInput[] = eligible.map((step) => ({
-            stepId: step.id!,
-            noteText: step.note!.text,
-            events: step.events
+            stepId: step.id,
+            noteText: step.note?.text ?? null,
+            events: step.events,
+            codeCandidate: pickCodeCandidate(step.events)
           }))
+          const codeCandidateByStepId = new Map(stepInputs.map((s) => [s.stepId, s.codeCandidate]))
           const summaries = await aiProvider.summarizeProgress(stepInputs, skillLevel)
 
           for (const item of summaries) {
@@ -346,7 +441,14 @@ export function startProgressWorker(
             if (!step) continue
 
             const status = stepStatusOf(step)
-            const result = emitProgress(item.stepId, item.summary, item.keyCode, status)
+            const candidate = codeCandidateByStepId.get(item.stepId) ?? null
+            // AI는 explanation/importance/application 3필드만 채운다 — filePath/lang/
+            // snippet/otherFiles는 이미 결정론적으로 뽑아둔 candidate와 병합한다.
+            // candidate가 없는데 AI가 keyCode를 만들어 보내면(할루시네이션) 무시한다.
+            const keyCode: ProgressKeyCode | null =
+              candidate && item.keyCode ? { ...candidate, ...item.keyCode } : null
+            const errorDetail = errorDetailOf(step.events)
+            const result = emitProgress(item.stepId, item.summary, keyCode, errorDetail, status)
             if (result !== null) {
               saveCaptions(
                 [
@@ -354,7 +456,8 @@ export function startProgressWorker(
                     targetType: 'step',
                     targetId: item.stepId,
                     summary: item.summary,
-                    keyCode: item.keyCode,
+                    keyCode,
+                    errorDetail,
                     stepPercent: result.percent,
                     status,
                     conceptTags: []
@@ -399,6 +502,7 @@ export function startProgressWorker(
               targetId: c.versionId,
               summary: c.caption,
               keyCode: null,
+              errorDetail: null,
               stepPercent: null,
               status: 'success' as const, // status는 step 행 전용 — code_unit_version 행은 스키마 기본값과 동일하게 둠
               conceptTags: c.conceptTags
@@ -420,8 +524,8 @@ export function startProgressWorker(
   }
 
   // "지금 하는 중" — Gemini 요약을 거치지 않는 로컬 규칙(최근 tool_event의 도구명+파일)만
-  // 사용해 훨씬 빠른 주기로 갱신한다. 완료된 스텝(위 tick)과 달리 아직 note로 닫히지
-  // 않은 진행 중 스텝만 본다 — 세션 종료나 진행 중 스텝이 없으면 idle.
+  // 사용해 훨씬 빠른 주기로 갱신한다. 완료된 스텝(위 tick)과 달리 아직 유휴/개수 cap으로
+  // 닫히지 않은 진행 중 스텝만 본다 — 세션 종료나 진행 중 스텝이 없으면 idle.
   const computeLiveStatus = (): LiveStatus => {
     const session = getLatestSession.get() as { id: string; ended_at: string | null } | undefined
     if (!session) return { text: '', idle: true }

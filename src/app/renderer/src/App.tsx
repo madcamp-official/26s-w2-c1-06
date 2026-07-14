@@ -5,36 +5,29 @@ import { MatchBar } from './components/MatchBar'
 import { OnboardingModal } from './components/OnboardingModal'
 import { ProgressTurtleBar } from './components/ProgressTurtleBar'
 import { QnaChat } from './components/QnaChat'
+import { QuizModal } from './components/QuizModal'
 import { SkillLevelToggle } from './components/SkillLevelToggle'
 import { StepLog } from './components/StepLog'
 import { StructureOverview } from './components/StructureOverview'
-import { TracePanel } from './components/TracePanel'
 import { UnitTimeline } from './components/UnitTimeline'
 import { useLectureNotes } from './hooks/useLectureNotes'
 import { useLiveStatus } from './hooks/useLiveStatus'
 import { useOnboarding } from './hooks/useOnboarding'
 import { useProgress } from './hooks/useProgress'
 import { useQna } from './hooks/useQna'
+import { useQuiz } from './hooks/useQuiz'
 import { useSessionTrace } from './hooks/useSessionTrace'
 import { useSkillLevel } from './hooks/useSkillLevel'
 import { useUnitTimeline } from './hooks/useUnitTimeline'
 
 function App() {
   const { skillLevel, setSkillLevel } = useSkillLevel()
-  const {
-    sessionId,
-    session,
-    matchStats,
-    createdEventIds,
-    prompts,
-    events,
-    notes: assistantNotes,
-    loading
-  } = useSessionTrace(skillLevel)
+  const { sessionId, session, matchStats, prompts } = useSessionTrace(skillLevel)
   const timeline = useUnitTimeline(skillLevel)
   const { notes, regenerate } = useLectureNotes()
   const { needsOnboarding, complete } = useOnboarding(setSkillLevel)
   const qna = useQna(sessionId, skillLevel)
+  const quiz = useQuiz(sessionId, skillLevel)
   const progress = useProgress()
   const liveStatus = useLiveStatus()
   const [qnaOpen, setQnaOpen] = useState(false)
@@ -61,8 +54,25 @@ function App() {
           disabled={!sessionId}
           onAsk={qna.ask}
         />
+        <button
+          type="button"
+          className="quiz-toggle"
+          onClick={quiz.toggle}
+          disabled={!sessionId}
+          title={sessionId ? '이번 세션에서 바뀐 코드로 복습 퀴즈 풀기' : '세션이 있어야 퀴즈를 풀 수 있어요'}
+        >
+          퀴즈
+        </button>
         <span className="app__session">{sessionId ? `세션: ${sessionId.slice(0, 8)}` : '세션 없음'}</span>
       </header>
+      {quiz.open && (
+        <QuizModal
+          loading={quiz.loading}
+          lessons={quiz.lessons}
+          onClose={quiz.toggle}
+          onRetry={quiz.regenerate}
+        />
+      )}
       <MatchBar session={session} prompts={prompts} matchStats={matchStats} />
       <section className="app__pane app__pane--full">
         <h2 className="app__pane-title">진행상황</h2>
@@ -77,19 +87,8 @@ function App() {
         />
         <StepLog history={progress.history} highlightStepId={highlightStepId} />
       </section>
-      <main className="app__main app__main--split">
-        <section className="app__pane">
-          <h2 className="app__pane-title">실행 로그</h2>
-          <TracePanel
-            prompts={prompts}
-            events={events}
-            notes={assistantNotes}
-            loading={loading}
-            sessionStartedAt={session?.started_at}
-            createdEventIds={createdEventIds}
-          />
-        </section>
-        <section className="app__pane">
+      <main className="app__main">
+        <section className="app__pane app__pane--full">
           <h2 className="app__pane-title">코드 구조도</h2>
           <StructureOverview
             units={timeline.units}

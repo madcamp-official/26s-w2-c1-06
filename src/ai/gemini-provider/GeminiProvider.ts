@@ -1,10 +1,11 @@
 import { GoogleGenAI, type Schema } from '@google/genai'
 import type { AssistantNote, CodeUnitVersionWithUnit, SkillLevel, ToolEvent } from '@shared/types'
+import type { QuizLesson } from '@shared/quiz'
 import type {
   AIProvider,
   BatchCaption,
   ContextBundle,
-  KeyCode,
+  KeyCodeExplanation,
   ProgressSummary,
   SessionTrace,
   StepInput,
@@ -22,6 +23,7 @@ import {
   buildProgressSummaryPrompt,
   PROGRESS_SUMMARY_RESPONSE_SCHEMA
 } from '../prompt-templates/progressSummaryPrompt'
+import { buildQuizPrompt, QUIZ_RESPONSE_SCHEMA } from '../prompt-templates/quizPrompt'
 
 // 'gemini-2.5-flash'는 이 프로젝트의 키 발급 시점 기준 신규 사용자에게 더 이상
 // 제공되지 않아(404), 구글이 계속 최신 무료 flash 모델을 가리키도록 유지하는
@@ -36,10 +38,9 @@ interface RawCaption {
 }
 
 interface RawKeyCode {
-  filePath?: string
-  lang?: string
-  snippet?: string
-  reason?: string
+  explanation?: string
+  importance?: string
+  application?: string
 }
 
 interface RawProgressSummary {
@@ -48,14 +49,47 @@ interface RawProgressSummary {
   keyCode?: RawKeyCode | null
 }
 
-function sanitizeKeyCode(raw: RawKeyCode | null | undefined): KeyCode | null {
+interface RawQuizQuestion {
+  prompt?: string
+  options?: string[]
+  correctIndex?: number
+  note?: string
+}
+
+interface RawQuizLesson {
+  versionId?: string
+  content?: string
+  code?: string
+  questions?: RawQuizQuestion[]
+}
+
+function sanitizeQuizQuestions(raw: RawQuizQuestion[] | undefined): QuizLesson['questions'] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter(
+      (q): q is Required<RawQuizQuestion> =>
+        Boolean(q.prompt?.trim()) &&
+        Array.isArray(q.options) &&
+        q.options.length >= 2 &&
+        typeof q.correctIndex === 'number' &&
+        q.correctIndex >= 0 &&
+        q.correctIndex < q.options.length
+    )
+    .map((q) => ({
+      prompt: q.prompt.trim(),
+      options: q.options,
+      correctIndex: q.correctIndex,
+      note: q.note?.trim() ?? ''
+    }))
+}
+
+function sanitizeKeyCode(raw: RawKeyCode | null | undefined): KeyCodeExplanation | null {
   if (!raw) return null
-  if (!raw.filePath || !raw.lang || !raw.snippet || !raw.reason) return null
+  if (!raw.explanation || !raw.importance || !raw.application) return null
   return {
-    filePath: raw.filePath,
-    lang: raw.lang,
-    snippet: raw.snippet,
-    reason: raw.reason
+    explanation: raw.explanation,
+    importance: raw.importance,
+    application: raw.application
   }
 }
 
@@ -119,6 +153,29 @@ export class GeminiProvider implements AIProvider {
         caption: item.caption,
         conceptTags: item.conceptTags ?? []
       }))
+  }
+
+  async generateQuiz(versions: CodeUnitVersionWithUnit[], skillLevel: SkillLevel): Promise<QuizLesson[]> {
+    if (versions.length === 0) return []
+
+    const raw = await this.generateJson<RawQuizLesson>(buildQuizPrompt(versions, skillLevel), QUIZ_RESPONSE_SCHEMA)
+    const versionById = new Map(versions.map((v) => [v.id, v]))
+
+    return raw
+      .filter((item) => item.versionId && versionById.has(item.versionId) && item.content?.trim())
+      .map((item) => {
+        const version = versionById.get(item.versionId!)!
+        return {
+          id: item.versionId!,
+          unitName: version.unit_name,
+          unitType: version.unit_type,
+          filePath: version.file_path,
+          content: item.content!.trim(),
+          code: item.code?.trim() ?? '',
+          questions: sanitizeQuizQuestions(item.questions)
+        }
+      })
+      .filter((lesson) => lesson.questions.length > 0)
   }
 
   async synthesizeLectureNote(trace: SessionTrace, skillLevel: SkillLevel): Promise<string> {
