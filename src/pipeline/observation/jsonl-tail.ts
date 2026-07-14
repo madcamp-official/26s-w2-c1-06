@@ -24,7 +24,10 @@ export interface TailOptions {
 export function tailFile(filePath: string, onLine: (line: string) => void, options: TailOptions = {}): FileTailer {
   const pollIntervalMs = options.pollIntervalMs ?? 300;
   let offset = 0;
-  let buffer = '';
+  // 문자열이 아니라 바이트 버퍼로 보관한다 — 폴링 경계가 멀티바이트 UTF-8 문자(한글 등)
+  // 중간에 걸리면 청크별로 따로 디코딩할 때 양쪽 모두 U+FFFD로 깨진다. 개행 단위로
+  // 완성된 부분만 디코딩하면 문자가 폴링 경계에 걸쳐 쪼개져도 안전하다.
+  let pending = Buffer.alloc(0);
   let stopped = false;
   let initialized = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -56,7 +59,7 @@ export function tailFile(filePath: string, onLine: (line: string) => void, optio
       if (stat.size < offset) {
         // 파일이 회전/교체됨 — 처음부터 다시 읽는다.
         offset = 0;
-        buffer = '';
+        pending = Buffer.alloc(0);
       }
 
       if (stat.size <= offset) {
@@ -64,16 +67,22 @@ export function tailFile(filePath: string, onLine: (line: string) => void, optio
         return;
       }
 
-      const stream = fs.createReadStream(filePath, { start: offset, end: stat.size - 1, encoding: 'utf8' });
-      let chunk = '';
+      const stream = fs.createReadStream(filePath, { start: offset, end: stat.size - 1 });
+      const chunks: Buffer[] = [];
       stream.on('data', (d) => {
-        chunk += d;
+        chunks.push(d as Buffer);
       });
       stream.on('end', () => {
         offset = stat.size;
-        buffer += chunk;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? ''; // 마지막(아직 flush 미완료일 수 있는) 라인은 버퍼에 보관
+        pending = Buffer.concat([pending, ...chunks]);
+        const lastNewline = pending.lastIndexOf(0x0a);
+        if (lastNewline === -1) {
+          schedule(); // 아직 완성된 라인이 없음 — 전부 버퍼에 보관
+          return;
+        }
+        const lines = pending.subarray(0, lastNewline).toString('utf8').split('\n');
+        // 마지막(아직 flush 미완료일 수 있는) 라인은 바이트 그대로 버퍼에 보관
+        pending = Buffer.from(pending.subarray(lastNewline + 1));
         for (const line of lines) {
           const trimmed = line.trim();
           if (trimmed.length === 0) continue;

@@ -14,14 +14,14 @@ export class Repo {
   constructor(private db: Database.Database) {}
 
   // --- sessions -------------------------------------------------------
-  ensureSession(id: string, projectPath: string, startedAt: string): void {
+  ensureSession(id: string, projectId: string, projectPath: string, startedAt: string): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_path, started_at, ended_at)
-         VALUES (@id, @projectPath, @startedAt, NULL)
+        `INSERT INTO sessions (id, project_id, project_path, started_at, ended_at)
+         VALUES (@id, @projectId, @projectPath, @startedAt, NULL)
          ON CONFLICT(id) DO NOTHING`
       )
-      .run({ id, projectPath, startedAt });
+      .run({ id, projectId, projectPath, startedAt });
   }
 
   // SessionStart 훅 마커는 transcript보다 먼저 도착할 수도, 나중에 도착할 수도 있다.
@@ -33,6 +33,15 @@ export class Repo {
   // SessionEnd 훅 마커 수신 시 기록. Person B는 이 값의 NULL→NOT NULL 전이를 강의노트 합성 트리거로 쓴다.
   setSessionEndedAt(id: string, endedAt: string): void {
     this.db.prepare(`UPDATE sessions SET ended_at = @endedAt WHERE id = @id`).run({ id, endedAt });
+  }
+
+  // 세션 재개(resume) 감지용: 이 id로 이미 종료 처리된 세션 행이 있는지 확인한다
+  // (index.ts의 resolveLogicalSessionId 참조 — 같은 JSONL 세션을 "완료" 후 다시
+  // "시작하기"로 재개하면 새 논리 세션 id를 발급해야 강의노트 재생성이 걸린다).
+  getSession(id: string): { ended_at: string | null } | undefined {
+    return this.db.prepare(`SELECT ended_at FROM sessions WHERE id = ?`).get(id) as
+      | { ended_at: string | null }
+      | undefined;
   }
 
   // --- prompts ----------------------------------------------------------
@@ -84,11 +93,18 @@ export class Repo {
   }
 
   // --- code_units / code_unit_versions --------------------------------------
-  upsertCodeUnit(params: { id: string; filePath: string; unitName: string; unitType: string; timestamp: string }): void {
+  upsertCodeUnit(params: {
+    id: string;
+    projectId: string;
+    filePath: string;
+    unitName: string;
+    unitType: string;
+    timestamp: string;
+  }): void {
     this.db
       .prepare(
-        `INSERT INTO code_units (id, file_path, unit_name, unit_type, first_seen_at, last_seen_at)
-         VALUES (@id, @filePath, @unitName, @unitType, @timestamp, @timestamp)
+        `INSERT INTO code_units (id, project_id, file_path, unit_name, unit_type, first_seen_at, last_seen_at)
+         VALUES (@id, @projectId, @filePath, @unitName, @unitType, @timestamp, @timestamp)
          ON CONFLICT(id) DO UPDATE SET last_seen_at = @timestamp`
       )
       .run(params);
@@ -123,22 +139,26 @@ export class Repo {
   }
 
   // --- code_unit_edges --------------------------------------------------
-  findUnitId(filePath: string, unitName: string): string | undefined {
-    const row = this.db.prepare(`SELECT id FROM code_units WHERE file_path = ? AND unit_name = ?`).get(filePath, unitName) as
-      | { id: string }
-      | undefined;
+  // project_id로도 스코프한다 — 서로 다른 프로젝트가 같은 상대경로+유닛명을 가질 수 있어
+  // (예: 둘 다 src/App.tsx의 App), 이걸 빼면 엣지가 다른 프로젝트의 유닛을 잘못 가리킬 수 있다.
+  findUnitId(projectId: string, filePath: string, unitName: string): string | undefined {
+    const row = this.db
+      .prepare(`SELECT id FROM code_units WHERE project_id = ? AND file_path = ? AND unit_name = ?`)
+      .get(projectId, filePath, unitName) as { id: string } | undefined;
     return row?.id;
   }
 
   // code_unit_edges는 "현재 상태" 스냅샷이라(SPEC 4.2), 파일을 재파싱할 때마다 그 파일 소속
   // 유닛이 from인 기존 엣지를 전부 지우고 새로 추출한 것만 다시 넣는다. 삭제된 유닛(과거에는
   // 있었지만 지금은 code_unit_versions에서 deleted 처리된 것)의 엣지도 여기서 함께 정리된다.
-  deleteEdgesFromFile(filePath: string): void {
+  // findUnitId와 같은 이유로 project_id 스코프 필수 — 다른 프로젝트가 같은 상대경로를 가지면
+  // (예: 둘 다 src/App.tsx) 그 프로젝트의 엣지까지 지워버린다.
+  deleteEdgesFromFile(projectId: string, filePath: string): void {
     this.db
       .prepare(
-        `DELETE FROM code_unit_edges WHERE from_unit_id IN (SELECT id FROM code_units WHERE file_path = ?)`
+        `DELETE FROM code_unit_edges WHERE from_unit_id IN (SELECT id FROM code_units WHERE project_id = ? AND file_path = ?)`
       )
-      .run(filePath);
+      .run(projectId, filePath);
   }
 
   insertEdge(params: { fromUnitId: string; toUnitId: string; edgeType: 'imports' | 'calls' | 'renders' }): void {

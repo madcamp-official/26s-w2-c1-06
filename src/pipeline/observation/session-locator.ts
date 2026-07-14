@@ -34,7 +34,12 @@ export function findLatestSessionFile(projectDir: string): string | null {
   for (const entry of entries) {
     if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
     const fullPath = path.join(projectDir, entry.name);
-    const stat = fs.statSync(fullPath);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(fullPath);
+    } catch {
+      continue; // readdir와 stat 사이에 파일이 지워진 레이스 — 이 파일만 건너뛴다
+    }
     if (stat.mtimeMs > latestMtimeMs) {
       latestMtimeMs = stat.mtimeMs;
       latestFile = fullPath;

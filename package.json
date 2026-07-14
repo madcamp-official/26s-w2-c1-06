@@ -24,6 +24,7 @@
     "chokidar": "^3.6.0",
     "diff-match-patch": "^1.0.5",
     "dotenv": "^17.4.2",
+    "lucide-react": "^1.24.0",
     "react-markdown": "^10.1.0",
     "web-tree-sitter": "^0.24.6"
   },
@@ -31,6 +32,7 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@electron-toolkit/utils": "^4.0.0",
+    "@tailwindcss/vite": "^4.3.2",
     "@types/better-sqlite3": "^7.6.13",
     "@types/diff-match-patch": "^1.0.36",
     "@types/node": "^22.15.0",
@@ -42,6 +44,7 @@
     "electron-vite": "^5.0.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "tailwindcss": "^4.3.2",
     "tsx": "^4.23.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.6"

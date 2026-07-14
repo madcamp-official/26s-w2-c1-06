@@ -45,9 +45,11 @@ function main() {
     console.error('[factcoding] pipeline error:', err);
   });
 
-  const shutdown = () => {
+  const shutdown = async () => {
     console.log('\n[factcoding] stopping...');
-    pipeline.stop();
+    // stop()은 진행 중인 AST diff가 DB에 기록될 때까지 기다린다 — await 없이 exit하면
+    // 종료 직전 변경이 유실된다.
+    await pipeline.stop();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

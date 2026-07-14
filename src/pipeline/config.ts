@@ -15,6 +15,9 @@ export const SCHEMA_PATH = path.join(REPO_ROOT, 'db', 'schema.sql');
 
 export function loadConfig(): PipelineConfig {
   return {
+    // CLI는 Electron의 프로젝트 등록 흐름 밖에서 도는 단독 실행 경로라 projects 테이블에
+    // 실제로 등록돼 있지 않을 수 있다 — 고정 id로 스코프해 테스트 데이터가 흩어지지 않게 한다.
+    projectId: process.env.FACTCODING_PROJECT_ID ?? 'cli-default',
     projectPath: process.env.FACTCODING_PROJECT_PATH ?? process.cwd(),
     // Electron 앱(dev)과 같은 DB를 보도록 db/factcoding.db로 통일 — 예전 기본값은
     // 리포 루트의 factcoding.db였는데, CLI로 채운 데이터가 앱에 안 보이는 원인이 됐다.

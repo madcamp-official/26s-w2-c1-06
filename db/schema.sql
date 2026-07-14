@@ -7,8 +7,18 @@
 --   PRAGMA busy_timeout = 5000;  -- 잠금 경합 시 즉시 실패 대신 대기
 --   PRAGMA foreign_keys = ON;
 
+-- 코드베이스 단위 묶음. 관제실/구조도/강의노트는 모두 이 project_id로 스코프된다.
+-- workspace_path가 실제 관찰 대상 폴더(= PipelineConfig.projectPath로 넘어가는 값).
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  workspace_path TEXT NOT NULL UNIQUE,
+  created_at DATETIME
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,       -- Claude Code 세션 UUID (JSONL 파일명 기준)
+  project_id TEXT REFERENCES projects(id),
   project_path TEXT,
   started_at DATETIME,
   ended_at DATETIME          -- Stop 이벤트 감지 시 파이프라인(A)이 기록.
@@ -39,7 +49,8 @@ CREATE TABLE IF NOT EXISTS tool_events (
 );
 
 CREATE TABLE IF NOT EXISTS code_units (
-  id TEXT PRIMARY KEY,      -- hash(file_path + unit_name)
+  id TEXT PRIMARY KEY,      -- hash(project_id + file_path + unit_name) — 프로젝트마다 독립된 id 공간
+  project_id TEXT REFERENCES projects(id),
   file_path TEXT,
   unit_name TEXT,
   unit_type TEXT,           -- function | component | hook | class
@@ -101,3 +112,5 @@ CREATE INDEX IF NOT EXISTS idx_tool_events_session_time ON tool_events(session_i
 CREATE INDEX IF NOT EXISTS idx_prompts_session_turn ON prompts(session_id, turn_index);
 CREATE INDEX IF NOT EXISTS idx_versions_unit ON code_unit_versions(unit_id, version_no);
 CREATE INDEX IF NOT EXISTS idx_units_file ON code_units(file_path);
+CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_units_project ON code_units(project_id, file_path);

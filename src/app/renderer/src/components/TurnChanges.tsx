@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { AiExplanation, CodeUnitVersionWithUnit, SkillLevel } from '@shared/types'
 import { formatTime, parseConceptTags } from '@shared/format'
 
-interface UnitTimelineProps {
+interface TurnChangesProps {
   versions: CodeUnitVersionWithUnit[]
   explanations: Map<string, AiExplanation>
 }
@@ -19,33 +19,31 @@ const CHANGE_BADGE: Record<string, string> = {
   deleted: 'bg-[#3a2525] text-[#f49d91]'
 }
 
-// SPEC 5.1 항목별 오버라이드: "쉽게 설명해줘"/"더 자세히" 두 방향만 제공
-// (헤더 토글의 3단계 전체를 다시 노출하면 카드마다 정보 밀도가 너무 높아짐).
+// SPEC 5.1 항목별 오버라이드: "쉽게 설명해줘"/"더 자세히" 두 방향만 제공.
 // 같은 버튼을 다시 누르면 오버라이드를 해제하고 전역 난이도로 돌아간다.
 const OVERRIDE_BUTTONS: Array<{ level: SkillLevel; label: string }> = [
   { level: 'beginner', label: '쉽게 설명해줘' },
   { level: 'advanced', label: '더 자세히' }
 ]
 
-// SPEC 4.5 코드 유닛 타임라인 + SPEC 5장 Level 3(요약/태그)·Level 4(raw diff).
-// 유닛 선택 자체는 StructureOverview(구조도)가 담당 — 이 컴포넌트는 선택된
-// 유닛의 버전 체인만 그린다. diff는 <details>로 기본 접힘 (Level 4 progressive disclosure).
-export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
+// TurnDetailPanel의 "변경사항" 섹션: 선택된 턴에서 바뀐 코드 유닛 버전(diff)들을
+// 보여준다. UnitTimeline(구조도 탭, 유닛 하나의 버전 체인)과 달리 한 턴 안에 여러
+// 유닛이 섞일 수 있어 카드마다 유닛 이름을 함께 표시한다.
+export function TurnChanges({ versions, explanations }: TurnChangesProps) {
   const [overrideLevel, setOverrideLevel] = useState<Record<string, SkillLevel>>({})
   const [overrideExplanation, setOverrideExplanation] = useState<Record<string, AiExplanation>>({})
   const [overridePending, setOverridePending] = useState<Record<string, boolean>>({})
 
   if (versions.length === 0) {
     return (
-      <p className="py-8 text-center text-[13px] text-muted-foreground">
-        구조도에서 유닛을 선택하세요.
+      <p className="py-6 text-center text-[13px] text-muted-foreground">
+        이 턴에서 바뀐 코드 유닛이 없어요.
       </p>
     )
   }
 
   const toggleOverride = async (versionId: string, level: SkillLevel): Promise<void> => {
     if (overrideLevel[versionId] === level) {
-      // 같은 버튼 재클릭 → 오버라이드 해제, 전역 난이도로 복귀
       setOverrideLevel((prev) => {
         const next = { ...prev }
         delete next[versionId]
@@ -67,22 +65,18 @@ export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
   }
 
   return (
-    <ol className="relative space-y-3 border-l border-[#29404a] pl-4">
+    <ol className="space-y-2.5">
       {versions.map((version) => {
         const activeOverride = overrideLevel[version.id]
-        const explanation = activeOverride
-          ? overrideExplanation[version.id]
-          : explanations.get(version.id)
+        const explanation = activeOverride ? overrideExplanation[version.id] : explanations.get(version.id)
         const pending = activeOverride && overridePending[version.id]
 
         return (
-          <li
-            key={version.id}
-            className="relative rounded-xl border border-border bg-[#121d25] p-4"
-          >
-            <span className="absolute -left-[21.5px] top-5 size-2 rounded-full border border-[#4b8b75] bg-[#193c35]" />
+          <li key={version.id} className="rounded-xl border border-border bg-[#121d25] p-3.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-[11px] font-semibold text-[#c8f1dc]">
+              <span className="text-[12.5px] font-semibold text-[#dce8ed]">{version.unit_name}</span>
+              <span className="font-mono text-[10px] text-[#7d99a5]">{version.unit_type}</span>
+              <span className="font-mono text-[10px] font-semibold text-[#c8f1dc]">
                 v{version.version_no}
               </span>
               <span
@@ -96,8 +90,9 @@ export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
                 {formatTime(version.created_at)}
               </span>
             </div>
+            <p className="mt-1 truncate font-mono text-[10px] text-[#5f7682]">{version.file_path}</p>
 
-            <div className="mt-2 text-[12.5px] leading-relaxed text-[#b9cad3]">
+            <div className="mt-2 text-[12px] leading-relaxed text-[#b9cad3]">
               {pending || !explanation ? (
                 <span className="font-mono text-[11px] text-[#8fc9ae]">요약 생성 중…</span>
               ) : (
@@ -117,7 +112,7 @@ export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
               )}
             </div>
 
-            <div className="mt-3 flex gap-1.5">
+            <div className="mt-2.5 flex gap-1.5">
               {OVERRIDE_BUTTONS.map((button) => (
                 <button
                   key={button.level}
@@ -135,7 +130,7 @@ export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
             </div>
 
             {version.diff_text && (
-              <details className="group mt-3">
+              <details className="group mt-2.5">
                 <summary className="cursor-pointer list-none font-mono text-[10px] tracking-[0.08em] text-[#6e8490] transition hover:text-[#8ed7ba] [&::-webkit-details-marker]:hidden">
                   ▸ DIFF 보기
                 </summary>

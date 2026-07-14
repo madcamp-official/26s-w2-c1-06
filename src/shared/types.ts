@@ -5,11 +5,50 @@ export type ToolStatus = 'pending' | 'success' | 'error'
 export type ChangeType = 'created' | 'modified' | 'deleted'
 export type UnitType = 'function' | 'component' | 'hook' | 'class'
 export type EdgeType = 'imports' | 'calls' | 'renders'
-export type SkillLevel = 'beginner' | 'intermediate' | 'advanced'
-export type AiExplanationTargetType = 'tool_event' | 'code_unit_version' | 'qna'
+// 5단계로 확장 — 온보딩 3단계(수강 과목/프로젝트 경험/교육 스타일)를 합쳐 계산한
+// 초기 위치를 사이드바의 "난이도 조절" 슬라이더가 5칸 중 하나로 표시하고, 이후
+// 사용자가 슬라이더를 밀어 더 쉽거나 어렵게 재조정할 수 있다. 각 값은 AI 프롬프트
+// 톤 지시문(SKILL_TONE_INSTRUCTIONS)의 키로도 그대로 쓰인다.
+export type SkillLevel = 'novice' | 'beginner' | 'intermediate' | 'advanced' | 'expert'
+
+// 온보딩 1단계: 수강 과목 자기 신고 (KAIST 전산학부 교육과정 기준).
+// courses에는 전공필수 체크 목록 + 전산기구조/시스템프로그래밍(주요 전공선택) +
+// 사용자가 직접 추가한 과목명이 모두 문자열로 섞여 들어간다.
+export interface OnboardingCourses {
+  courses: string[]
+}
+
+// 온보딩 2단계: 프로젝트 경험 (Top-down 신호).
+export type ProjectCountBucket = '0' | '1-2' | '3-5' | '6+'
+
+export interface OnboardingProjects {
+  projectBucket: ProjectCountBucket
+  stack: string[]
+}
+
+// 온보딩 3단계: 전반적인 교육 스타일 선호.
+export type TeachingStyle = 'theory-first' | 'practice-first' | 'analogy' | 'balanced'
+
+// 3단계를 합친 전체 프로필 — user_settings에 JSON으로 저장되고, 난이도 슬라이더의
+// 초기 위치를 계산하는 데 쓰인다 (src/shared/skillProfile.ts의 computeSkillProfile).
+export interface OnboardingProfile extends OnboardingCourses, OnboardingProjects {
+  style: TeachingStyle
+}
+// 'prompt' = 턴(요청) 전체를 묶은 feature 단위 해설. 개별 tool_event(Read/Write/Bash 등)
+// 단위 해설은 더 이상 생성하지 않는다 — 관제실은 코딩 수정이 "완료된" 턴 단위로만
+// AI를 호출해 정리한다(caption-worker.ts 참조). 'tool_event'는 과거 데이터 호환용으로 남겨둔다.
+export type AiExplanationTargetType = 'tool_event' | 'prompt' | 'code_unit_version' | 'qna'
+
+export interface Project {
+  id: string
+  name: string
+  workspace_path: string
+  created_at: string | null
+}
 
 export interface Session {
   id: string
+  project_id: string | null
   project_path: string | null
   started_at: string | null
   ended_at: string | null
@@ -39,6 +78,7 @@ export interface ToolEvent {
 
 export interface CodeUnit {
   id: string
+  project_id: string | null
   file_path: string
   unit_name: string
   unit_type: UnitType
@@ -91,6 +131,41 @@ export interface AiExplanation {
 export interface UserSetting {
   key: string
   value: string | null
+}
+
+// 같은 세션 안의 직전 문답 — generateContent는 무상태라 "이전 질문 기억"을 흉내내려면
+// 매 호출마다 히스토리를 프롬프트에 명시적으로 다시 넣어야 한다(Q&A 챗, ai/types.ts AIProvider).
+export interface QnaHistoryEntry {
+  question: string
+  answer: string
+}
+
+// SPEC 4.6 "파이프라인 이벤트 → IPC push": main이 DB를 갱신할 때마다 이 중 하나의
+// kind로 렌더러에 push해 즉시 재조회를 트리거한다. 렌더러의 폴링은 이 push를 놓친
+// 경우(리스너 등록 전 이벤트, 예외 등)의 안전망으로 더 느린 주기로 계속 남겨둔다.
+export type DataChangeKind =
+  | 'trace' // prompts/tool_events (관찰 중인 세션의 턴/액션)
+  | 'code-units' // code_units/code_unit_versions/code_unit_edges (구조도, AST diff)
+  | 'explanation' // ai_explanations upsert (턴 해설, 유닛 버전 해설)
+  | 'lecture-note' // lecture_notes insert (강의노트 자동 합성)
+  | 'session' // sessions insert/update (started_at/ended_at, 모니터링 상태)
+
+// 턴 해설의 "말풍선" 한 개. 강사가 칠판(구조도) 앞에서 설명하듯,
+// overview(전체 구조에서 이번 턴의 위치) → change(바뀐 내용 서술식 해설)
+// → concept(알아야 할 개념/자료구조/알고리즘) 순서로 여러 개가 이어진다.
+export type TurnBubbleKind = 'overview' | 'change' | 'concept'
+
+export interface TurnNarrativeBubble {
+  kind: TurnBubbleKind
+  title: string | null
+  text: string
+}
+
+// target_type='prompt'인 ai_explanations.content에 JSON으로 직렬화되는 형태.
+// summary는 목록/헤더용 한 줄 요약, bubbles가 실제 해설 본문.
+export interface TurnNarrative {
+  summary: string
+  bubbles: TurnNarrativeBubble[]
 }
 
 // --- 아래는 Person A(파이프라인) 전용 타입: JSONL 트랜스크립트 파싱 결과와
@@ -165,6 +240,8 @@ export interface PipelineAssetPaths {
 }
 
 export interface PipelineConfig {
+  /** projects.id — code_units/sessions를 이 프로젝트로 스코프하는 데 쓰인다 */
+  projectId: string
   /** 관찰 대상 프로젝트 절대 경로 (~/.claude/projects/<hash> 매핑에 사용) */
   projectPath: string
   /** SQLite DB 파일 경로 */
@@ -180,9 +257,23 @@ export interface PipelineConfig {
 }
 
 export interface PipelineHandle {
-  stop(): void
+  // 진행 중인 AST diff(비동기 파싱 → DB 기록)를 모두 끝내고 커넥션을 닫은 뒤 resolve된다.
+  // 프로세스를 곧바로 종료할 호출자는 반드시 await할 것 — 아니면 마지막 변경이 유실될 수 있다.
+  stop(): Promise<void>
   on(event: 'transcript-event', listener: (e: TranscriptEvent) => void): void
   on(event: 'session-file-changed', listener: (filePath: string) => void): void
+  // AST diff(runAstDiff)가 code_units/code_unit_versions/code_unit_edges를 커밋한 직후 emit —
+  // 렌더러에 구조도/타임라인 갱신을 push하기 위한 신호(Electron main이 구독, SPEC 4.6).
+  on(event: 'code-units-changed', listener: () => void): void
+  // SessionStart/SessionEnd 훅 마커를 반영한 직후 emit — sessions 테이블이 바뀌었다는 신호.
+  on(event: 'session-updated', listener: () => void): void
+  /**
+   * 지금 실제로 DB에 기록 중인 "논리" 세션 id가 정해질 때마다 emit(세션 재개 감지 포함,
+   * index.ts의 resolveLogicalSessionId 참조). session-file-changed는 JSONL 파일명(=원본
+   * id) 기준이라 재개 시나리오에서 실제 논리 id와 달라질 수 있어, 호출자는 markSessionEnded에
+   * 넘길 id를 이 이벤트로 추적해야 한다.
+   */
+  on(event: 'session-resolved', listener: (sessionId: string) => void): void
   on(event: 'error', listener: (err: unknown) => void): void
   /**
    * SessionEnd 훅(자동: /exit, Ctrl-C, /clear, 로그아웃 등)과는 별개로, UI의 "프로젝트/세션

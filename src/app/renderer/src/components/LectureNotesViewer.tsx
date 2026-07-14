@@ -1,20 +1,17 @@
 import { useState } from 'react'
 import Markdown from 'react-markdown'
+import { BookOpen, RefreshCw } from 'lucide-react'
 import type { LectureNote, SkillLevel } from '@shared/types'
 import { formatTime } from '@shared/format'
+import { SKILL_LEVEL_LABEL, SKILL_LEVEL_ORDER } from '@shared/skillProfile'
 
 interface LectureNotesViewerProps {
   notes: LectureNote[]
   onRegenerate: (sessionId: string, skillLevel: SkillLevel) => Promise<void>
 }
 
-const SKILL_LABEL: Record<SkillLevel, string> = {
-  beginner: '초급',
-  intermediate: '중급',
-  advanced: '고급'
-}
-
-const ALL_LEVELS: SkillLevel[] = ['beginner', 'intermediate', 'advanced']
+const SKILL_LABEL = SKILL_LEVEL_LABEL
+const ALL_LEVELS = SKILL_LEVEL_ORDER
 
 interface SessionGroup {
   sessionId: string
@@ -45,8 +42,12 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
 
   if (notes.length === 0) {
     return (
-      <div className="lecture-notes lecture-notes--empty">
-        아직 종료된 세션이 없습니다. 세션이 끝나면(Stop 훅 감지) 자동으로 강의노트가 생성됩니다.
+      <div className="grid place-items-center rounded-xl border border-border bg-card px-6 py-16 text-center">
+        <BookOpen size={28} className="mb-3 text-[#40545e]" />
+        <p className="max-w-[420px] text-[13px] leading-6 text-muted-foreground">
+          아직 종료된 세션이 없습니다. 세션이 끝나면(완료 버튼 또는 Stop 훅 감지) 자동으로
+          강의노트가 생성됩니다.
+        </p>
       </div>
     )
   }
@@ -54,14 +55,19 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
   const groups = groupBySession(notes)
 
   return (
-    <div className="lecture-notes">
+    <div className="space-y-5">
       {groups.map((group) => {
         const presentLevels = new Set(group.notes.map((note) => note.skill_level))
         return (
-          <section key={group.sessionId} className="lecture-note-group">
-            <div className="lecture-note-group__header">
-              <span className="lecture-note__session">session: {group.sessionId.slice(0, 8)}</span>
-              <div className="lecture-note-group__regen">
+          <section
+            key={group.sessionId}
+            className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_18px_45px_rgba(0,0,0,.14)]"
+          >
+            <div className="flex flex-wrap items-center gap-3 border-b border-border px-5 py-3.5">
+              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#75909a]">
+                SESSION / {group.sessionId.slice(0, 8)}
+              </span>
+              <div className="ml-auto flex gap-1.5">
                 {ALL_LEVELS.filter((level) => !presentLevels.has(level)).map((level) => {
                   const key = `${group.sessionId}:${level}`
                   const pending = pendingKey === key
@@ -69,7 +75,6 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
                     <button
                       key={level}
                       type="button"
-                      className="lecture-note-group__regen-btn"
                       disabled={pending}
                       onClick={async () => {
                         setPendingKey(key)
@@ -79,26 +84,33 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
                           setPendingKey(null)
                         }
                       }}
+                      className="flex items-center gap-1.5 rounded-md border border-border bg-[#121d25] px-2.5 py-1.5 text-[11px] text-[#9db0ba] transition hover:bg-[#1b2a33] hover:text-[#c8f1dc] disabled:opacity-50"
                     >
+                      <RefreshCw size={11} className={pending ? 'animate-spin' : undefined} />
                       {pending ? '생성 중…' : `${SKILL_LABEL[level]}로도 보기`}
                     </button>
                   )
                 })}
               </div>
             </div>
-            {group.notes.map((note) => (
-              <article key={note.id} className="lecture-note">
-                <header className="lecture-note__header">
-                  <span className="lecture-note__skill">
-                    {SKILL_LABEL[note.skill_level] ?? note.skill_level}
-                  </span>
-                  <span className="lecture-note__time">{formatTime(note.created_at)}</span>
-                </header>
-                <div className="lecture-note__body">
-                  <Markdown>{note.markdown}</Markdown>
-                </div>
-              </article>
-            ))}
+
+            <div className="divide-y divide-border">
+              {group.notes.map((note) => (
+                <article key={note.id} className="px-5 py-4">
+                  <header className="mb-3 flex items-center gap-2">
+                    <span className="rounded bg-[#1e3540] px-2 py-0.5 text-[11px] font-semibold text-[#c7f5e0]">
+                      {SKILL_LABEL[note.skill_level] ?? note.skill_level}
+                    </span>
+                    <span className="font-mono text-[10px] text-[#536b76]">
+                      {formatTime(note.created_at)}
+                    </span>
+                  </header>
+                  <div className="markdown-body">
+                    <Markdown>{note.markdown}</Markdown>
+                  </div>
+                </article>
+              ))}
+            </div>
           </section>
         )
       })}

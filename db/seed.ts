@@ -12,6 +12,7 @@ const db = openDatabase(DEFAULT_DB_PATH)
 const now = Date.now()
 const iso = (offsetMs: number): string => new Date(now + offsetMs).toISOString()
 
+const projectId = randomUUID()
 const sessionId = randomUUID()
 const promptIds = [randomUUID(), randomUUID(), randomUUID()]
 const toolEventIds = Array.from({ length: 8 }, () => randomUUID())
@@ -21,9 +22,14 @@ const codeUnitIds = {
   formatDuration: randomUUID()
 }
 
+const insertProject = db.prepare(`
+  INSERT INTO projects (id, name, workspace_path, created_at)
+  VALUES (@id, @name, @workspace_path, @created_at)
+`)
+
 const insertSession = db.prepare(`
-  INSERT INTO sessions (id, project_path, started_at, ended_at)
-  VALUES (@id, @project_path, @started_at, @ended_at)
+  INSERT INTO sessions (id, project_id, project_path, started_at, ended_at)
+  VALUES (@id, @project_id, @project_path, @started_at, @ended_at)
 `)
 
 const insertPrompt = db.prepare(`
@@ -39,8 +45,8 @@ const insertToolEvent = db.prepare(`
 `)
 
 const insertCodeUnit = db.prepare(`
-  INSERT INTO code_units (id, file_path, unit_name, unit_type, first_seen_at, last_seen_at)
-  VALUES (@id, @file_path, @unit_name, @unit_type, @first_seen_at, @last_seen_at)
+  INSERT INTO code_units (id, project_id, file_path, unit_name, unit_type, first_seen_at, last_seen_at)
+  VALUES (@id, @project_id, @file_path, @unit_name, @unit_type, @first_seen_at, @last_seen_at)
 `)
 
 const insertCodeUnitVersion = db.prepare(`
@@ -56,9 +62,17 @@ const insertCodeUnitEdge = db.prepare(`
 `)
 
 const seed = db.transaction(() => {
+  insertProject.run({
+    id: projectId,
+    name: 'campus-market (demo)',
+    workspace_path: '/Users/demo/campus-market',
+    created_at: iso(-25 * 60_000)
+  })
+
   insertSession.run({
     id: sessionId,
-    project_path: '/Users/demo/factcoding',
+    project_id: projectId,
+    project_path: '/Users/demo/campus-market',
     started_at: iso(-20 * 60_000),
     ended_at: null
   })
@@ -189,6 +203,7 @@ const seed = db.transaction(() => {
 
   insertCodeUnit.run({
     id: codeUnitIds.tracePanel,
+    project_id: projectId,
     file_path: 'src/app/renderer/src/components/TracePanel.tsx',
     unit_name: 'TracePanel',
     unit_type: 'component',
@@ -197,6 +212,7 @@ const seed = db.transaction(() => {
   })
   insertCodeUnit.run({
     id: codeUnitIds.useToolEvents,
+    project_id: projectId,
     file_path: 'src/app/renderer/src/hooks/useToolEvents.ts',
     unit_name: 'useToolEvents',
     unit_type: 'hook',
@@ -205,6 +221,7 @@ const seed = db.transaction(() => {
   })
   insertCodeUnit.run({
     id: codeUnitIds.formatDuration,
+    project_id: projectId,
     file_path: 'src/shared/format.ts',
     unit_name: 'formatDuration',
     unit_type: 'function',

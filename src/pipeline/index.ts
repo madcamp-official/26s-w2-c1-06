@@ -51,7 +51,12 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
   const snapshotCache = new SnapshotCache();
   const planTracker = new PlanTracker();
 
-  const seenSessions = new Set<string>();
+  // JSONL의 세션 id(파일명, "원본 id") → sessions 테이블에 실제로 쓰는 id("논리 id")
+  // 매핑. 평소엔 1:1이지만, 같은 원본 id가 이미 ended_at 처리된 뒤(= "완료"를 누르고
+  // 같은 터미널에서 "시작하기"로 재개한 경우) 다시 관찰되면 새 논리 id를 발급한다 —
+  // 그래야 이미 강의노트가 있는 세션 행을 재사용하지 않고 재개 이후 내용이 새 세션으로
+  // 잡혀 강의노트 자동 합성이 다시 걸린다(resolveLogicalSessionId 참조).
+  const logicalSessionIdByRawId = new Map<string, string>();
   const turnIndexBySession = new Map<string, number>();
   const currentPromptIdBySession = new Map<string, string | null>();
   // manual-watch 콜백은 특정 transcript 이벤트에 딸려오지 않으므로 "지금 관찰 중인 세션"이
@@ -114,10 +119,25 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
     ).catch((err) => emitter.emit('error', err));
   }
 
-  function ensureSessionSeen(sessionId: string, timestamp: string) {
-    if (seenSessions.has(sessionId)) return;
-    seenSessions.add(sessionId);
-    repo.ensureSession(sessionId, config.projectPath, timestamp);
+  // rawId(JSONL 파일명 = Claude Code 세션 UUID)를 논리 세션 id로 변환한다. 처음 보는
+  // rawId면 그대로 사용(흔한 경우), 이미 종료 처리된 세션이면 재개로 판단해 새 id를
+  // 발급하고 새 sessions 행을 만든다. 같은 rawId에 대해 이 pipeline 인스턴스 수명 동안
+  // 한 번만 DB를 조회하고(Map으로 캐시), 이후엔 캐시된 값을 즉시 반환한다.
+  function resolveLogicalSessionId(rawId: string, timestamp: string): string {
+    const cached = logicalSessionIdByRawId.get(rawId);
+    if (cached) return cached;
+
+    const existing = repo.getSession(rawId);
+    const isResume = existing !== undefined && existing.ended_at !== null;
+    const logicalId = isResume ? `${rawId}#${randomUUID()}` : rawId;
+
+    logicalSessionIdByRawId.set(rawId, logicalId);
+    repo.ensureSession(logicalId, config.projectId, config.projectPath, timestamp);
+    // Electron main이 "완료" 버튼에 넘길 세션 id를 이 논리 id로 추적할 수 있게 알려준다
+    // (SPEC 4.6 IPC push와 같은 목적 — session-file-changed는 파일명 기반이라 재개
+    // 시나리오에서 실제로 쓰이는 논리 id와 다를 수 있다).
+    emitter.emit('session-resolved', logicalId);
+    return logicalId;
   }
 
   // setImmediate로 미룬다: startPipeline()이 핸들을 반환하기 전에(=호출자가 아직 'error'
@@ -163,12 +183,19 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
       for (const unit of beforeUnits) allKnownUnits.set(unit.unitName, unit);
       for (const unit of afterUnits) allKnownUnits.set(unit.unitName, unit); // 존재하면 최신 정보로 덮어씀
       for (const unit of allKnownUnits.values()) {
-        const unitId = computeUnitId(filePath, unit.unitName);
-        repo.upsertCodeUnit({ id: unitId, filePath, unitName: unit.unitName, unitType: unit.unitType, timestamp });
+        const unitId = computeUnitId(config.projectId, filePath, unit.unitName);
+        repo.upsertCodeUnit({
+          id: unitId,
+          projectId: config.projectId,
+          filePath,
+          unitName: unit.unitName,
+          unitType: unit.unitType,
+          timestamp
+        });
       }
 
       for (const change of changes) {
-        const unitId = computeUnitId(filePath, change.unitName);
+        const unitId = computeUnitId(config.projectId, filePath, change.unitName);
         const versionNo = repo.getNextVersionNo(unitId);
         repo.insertCodeUnitVersion({
           // toolEventId+unitId로 결정론적 id를 구성 — 같은 tool_event가 같은 unit을 두 번 바꿀 수
@@ -185,44 +212,49 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
       }
 
       // "현재 상태" 스냅샷: 이 파일 소속 from 엣지를 전부 지우고 새로 추출한 것만 다시 넣는다.
-      repo.deleteEdgesFromFile(filePath);
+      repo.deleteEdgesFromFile(config.projectId, filePath);
       for (const edge of edges) {
-        const fromUnitId = computeUnitId(filePath, edge.fromUnitName);
-        const toUnitId = repo.findUnitId(edge.toFilePath, edge.toUnitName);
+        const fromUnitId = computeUnitId(config.projectId, filePath, edge.fromUnitName);
+        const toUnitId = repo.findUnitId(config.projectId, edge.toFilePath, edge.toUnitName);
         if (!toUnitId) continue; // 대상 유닛이 아직 관찰되지 않음 — 스킵(SPEC 4.2)
         repo.insertEdge({ fromUnitId, toUnitId, edgeType: edge.edgeType });
       }
     });
+
+    // 구조도/타임라인이 이 커밋을 즉시 반영할 수 있도록 신호를 보낸다(SPEC 4.6 IPC push).
+    emitter.emit('code-units-changed');
   }
 
   async function handleTranscriptEvent(event: TranscriptEvent) {
-    ensureSessionSeen(event.sessionId, event.timestamp);
-    mostRecentSessionId = event.sessionId;
+    // event.sessionId는 JSONL의 "원본" 세션 id — 재개 시나리오를 감지해 실제로 DB에
+    // 쓰는 "논리" 세션 id로 변환한다. 아래는 전부 이 논리 id 기준으로 동작한다.
+    const sessionId = resolveLogicalSessionId(event.sessionId, event.timestamp);
+    mostRecentSessionId = sessionId;
 
     switch (event.kind) {
       case 'prompt': {
-        const turnIndex = (turnIndexBySession.get(event.sessionId) ?? -1) + 1;
-        turnIndexBySession.set(event.sessionId, turnIndex);
+        const turnIndex = (turnIndexBySession.get(sessionId) ?? -1) + 1;
+        turnIndexBySession.set(sessionId, turnIndex);
         // event.uuid는 JSONL 라인 자체에서 결정론적으로 파생된 값(transcript-parser.ts) —
         // randomUUID()를 쓰면 세션을 다시 리플레이할 때마다 prompt id가 달라져 중복 행이 쌓인다.
         const promptId = event.uuid;
-        currentPromptIdBySession.set(event.sessionId, promptId);
+        currentPromptIdBySession.set(sessionId, promptId);
         repo.insertPrompt({
           id: promptId,
-          sessionId: event.sessionId,
+          sessionId,
           turnIndex,
           userText: event.userText,
           createdAt: event.timestamp,
         });
-        planTracker.startTurn(event.sessionId);
+        planTracker.startTurn(sessionId);
         break;
       }
 
       case 'tool_use': {
-        const promptId = currentPromptIdBySession.get(event.sessionId) ?? null;
+        const promptId = currentPromptIdBySession.get(sessionId) ?? null;
         repo.insertToolEvent({
           id: event.toolUseId,
-          sessionId: event.sessionId,
+          sessionId,
           promptId,
           toolName: event.toolName,
           filePath: event.filePath ?? null,
@@ -270,7 +302,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
           ({ before } = snapshotCache.applyWrite(filePath, input.content));
         }
 
-        const promptIdForVersion = currentPromptIdBySession.get(event.sessionId) ?? null;
+        const promptIdForVersion = currentPromptIdBySession.get(sessionId) ?? null;
         const timestamp = event.timestamp;
         lastAgentEditAtByFile.set(filePath, Date.now());
         scheduleAstDiff(filePath, before, event.toolUseId, promptIdForVersion, timestamp);
@@ -278,17 +310,17 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
       }
 
       case 'assistant_text': {
-        const text = planTracker.considerAssistantText(event.sessionId, event.text);
+        const text = planTracker.considerAssistantText(sessionId, event.text);
         if (text !== null) {
-          const promptId = currentPromptIdBySession.get(event.sessionId);
+          const promptId = currentPromptIdBySession.get(sessionId);
           if (promptId) repo.updatePromptPlanText(promptId, text);
         }
         break;
       }
 
       case 'todo_write': {
-        const planText = planTracker.considerTodoWrite(event.sessionId, event.todos);
-        const promptId = currentPromptIdBySession.get(event.sessionId);
+        const planText = planTracker.considerTodoWrite(sessionId, event.todos);
+        const promptId = currentPromptIdBySession.get(sessionId);
         if (promptId) repo.updatePromptPlanText(promptId, planText);
         break;
       }
@@ -342,32 +374,45 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
 
   // SessionStart/SessionEnd 훅이 남기는 마커 tail. sessions.started_at/ended_at을
   // 훅이 주는 권위 있는 시각으로 기록한다(ended_at은 Person B의 강의노트 합성 트리거 신호).
+  // marker.sessionId도 transcript-event와 동일한 "원본" id라 resolveLogicalSessionId를
+  // 그대로 통과시킨다 — 재개된 세션이면 transcript-event 쪽에서 이미 만든 논리 id를
+  // 그대로 재사용하고(캐시 hit), 재개가 아니면 원본 id를 그대로 쓴다(기존 동작과 동일).
   const sessionEventsTailer = tailSessionEvents(
     config.projectPath,
     (marker) => {
+      const sessionId = resolveLogicalSessionId(marker.sessionId, marker.ts);
       if (marker.type === 'start') {
-        seenSessions.add(marker.sessionId);
-        repo.ensureSession(marker.sessionId, config.projectPath, marker.ts);
-        repo.setSessionStartedAt(marker.sessionId, marker.ts);
+        repo.setSessionStartedAt(sessionId, marker.ts);
       } else {
-        repo.setSessionEndedAt(marker.sessionId, marker.ts);
+        repo.setSessionEndedAt(sessionId, marker.ts);
       }
+      emitter.emit('session-updated');
     },
     (err) => emitter.emit('error', err)
   );
 
-  // 에이전트가 아닌 수동 파일 수정 감지 (SPEC 4.1 fallback).
+  // 에이전트가 아닌 수동 파일 생성/수정/삭제 감지 (SPEC 4.1 fallback).
+  // syncFromDisk는 파일이 없으면(unlink) 캐시 항목을 지우고 get()이 ''을 돌려주므로,
+  // add(before='' → after=내용)/change/unlink(before=내용 → after='') 세 경우 모두
+  // 이 한 로직으로 처리된다 — unlink는 matchUnits에서 자연스럽게 "모든 유닛 삭제"로 잡힌다.
   const manualWatcher = watchManualEdits(
     config.projectPath,
     (filePath) => {
       const lastAgentEditAt = lastAgentEditAtByFile.get(filePath);
       return lastAgentEditAt !== undefined && Date.now() - lastAgentEditAt < MANUAL_EDIT_DEDUP_WINDOW_MS;
     },
-    (filePath) => {
+    (filePath, kind, isBulk) => {
       const before = snapshotCache.get(filePath);
       snapshotCache.syncFromDisk(filePath);
       const after = snapshotCache.get(filePath);
       if (before === after) return; // 실제 내용 변화 없음(touch 등) — 스킵
+
+      if (isBulk) {
+        // git checkout/브랜치 전환 등 대량 변경 — 캐시는 위에서 이미 동기화됐으니
+        // 여기서 끝낸다. 개별 파일마다 "수동 수정" tool_event/AST diff를 만들면
+        // 사용자가 직접 타이핑한 것처럼 트레이스가 오염되고 파싱 비용도 크다.
+        return;
+      }
 
       const toolEventId = randomUUID();
       const timestamp = new Date().toISOString();
@@ -375,7 +420,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
         id: toolEventId,
         sessionId: mostRecentSessionId,
         promptId: null, // 수동 수정은 특정 turn에 속하지 않는다
-        toolName: 'ManualEdit',
+        toolName: kind === 'add' ? 'ManualCreate' : kind === 'unlink' ? 'ManualDelete' : 'ManualEdit',
         filePath,
         source: 'manual',
         rawPayload: JSON.stringify({ before, after }),
@@ -388,24 +433,31 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
   );
 
   return {
-    stop() {
+    async stop() {
       if (stopped) return;
       stopped = true;
       currentTailer?.stop();
       sessionEventsTailer.stop();
       manualWatcher.stop();
-      // 대기 중인 디바운스 타이머는 완료를 기다리지 않고 취소한다 — 이미 async 파싱 작업이
-      // db.close() 이후까지 걸쳐 실행되는 걸 막기 위한 단순한 선택(알려진 한계: 종료 직전
-      // 500ms 이내의 마지막 연속 Edit 배치 하나는 유실될 수 있음, IMPLEMENTATION_PLAN_A.md 참조).
-      for (const pending of pendingDiffByFile.values()) clearTimeout(pending.timer);
-      pendingDiffByFile.clear();
       clearInterval(sessionCheckTimer);
+      // 대기 중인 디바운스 diff는 버리지 않고 즉시 플러시해 큐에 넣는다 — 예전엔 타이머만
+      // 취소해서 종료 직전 500ms 이내의 마지막 Edit 배치가 유실됐다(알려진 한계였음).
+      for (const filePath of [...pendingDiffByFile.keys()]) {
+        const pending = pendingDiffByFile.get(filePath);
+        if (pending) clearTimeout(pending.timer);
+        flushPendingDiff(filePath);
+      }
+      // 진행/대기 중인 AST diff(비동기 파싱 → DB 기록)가 전부 끝난 뒤에 커넥션을 닫는다.
+      // 예전엔 동기적으로 바로 close해서, parseSource를 await하던 작업이 재개될 때
+      // "Database is closed"로 죽고 종료 직전 변경 내역이 통째로 유실되는 레이스가 있었다.
+      await Promise.allSettled([...astDiffQueueByFile.values()]);
       db.close();
     },
     on(event: string, listener: (...args: unknown[]) => void) {
       emitter.on(event, listener);
     },
     markSessionEnded(sessionId: string) {
+      if (stopped) return; // stop() 이후엔 커넥션이 닫혀 있다 — 호출 순서 실수로 죽지 않게 방어
       // SessionEnd 훅과 동일하게 처리하되, 트리거 주체가 훅이 아니라 UI의 명시적 사용자 액션이다.
       repo.setSessionEndedAt(sessionId, new Date().toISOString());
     },
