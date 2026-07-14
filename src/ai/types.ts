@@ -51,6 +51,7 @@ export interface KeyCodeExplanation {
   explanation: string
   importance: string
   application: string
+  conceptTags: string[]
 }
 
 export interface ProgressSummary {

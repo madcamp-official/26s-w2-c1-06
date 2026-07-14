@@ -24,6 +24,7 @@ export function tailSessionEvents(
   onError?: (err: unknown) => void
 ): FileTailer {
   const filePath = path.join(projectPath, '.factcoding', 'session-events.jsonl');
+  const cursorPath = path.join(projectPath, '.factcoding', 'cursors', 'session-events.jsonl.offset');
   return tailFile(
     filePath,
     (line) => {
@@ -37,6 +38,6 @@ export function tailSessionEvents(
         onMarker({ type: obj.type, sessionId: obj.session_id, ts: obj.ts });
       }
     },
-    { onError }
+    { onError, cursorPath }
   );
 }

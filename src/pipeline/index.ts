@@ -325,6 +325,10 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
     currentTailer?.stop();
     currentFile = filePath;
     currentSessionId = path.basename(filePath, '.jsonl');
+    // 세션별 커서를 디스크에 남겨, 앱 재시작으로 offset이 메모리에서 리셋돼도 이미 읽은
+    // transcript를 처음부터 다시 읽지 않게 한다(안 그러면 DB가 한 번이라도 비워진 뒤엔
+    // 재시작마다 이 세션 전체가 재처리되며 AI 호출/진행 스텝이 중복 발생한다).
+    const cursorPath = path.join(config.projectPath, '.factcoding', 'cursors', `${currentSessionId}.jsonl.offset`);
     currentTailer = tailFile(
       filePath,
       (line) => {
@@ -336,7 +340,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
           });
         }
       },
-      { onError: (err) => emitter.emit('error', err) }
+      { onError: (err) => emitter.emit('error', err), cursorPath }
     );
     emitter.emit('session-file-changed', filePath);
   }

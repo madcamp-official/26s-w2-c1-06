@@ -15,6 +15,8 @@
     "db:init": "tsx db/init.ts",
     "db:seed": "tsx db/seed.ts",
     "test:keypool": "tsx scripts/test-keypool.ts",
+    "test:schema-converter": "tsx scripts/test-schema-converter.ts",
+    "test:session-locator": "tsx scripts/test-session-locator.ts",
     "pipeline": "tsx src/pipeline/cli.ts"
   },
   "dependencies": {
@@ -24,6 +26,7 @@
     "chokidar": "^3.6.0",
     "diff-match-patch": "^1.0.5",
     "dotenv": "^17.4.2",
+    "openai": "^6.46.0",
     "react-markdown": "^10.1.0",
     "web-tree-sitter": "^0.24.6"
   },

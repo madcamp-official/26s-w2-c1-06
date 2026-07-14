@@ -66,7 +66,9 @@ export function buildProgressSummaryPrompt(steps: StepInput[], skillLevel: Skill
     '    스텝이 실패([상태: 실패])면 가급적 3)번 관점으로, 실패 원인이 된 지점을 가리켜라.',
     '  - application: 이 코드를 보고 배울 점/앞으로 어떻게 적용할지 한 문장(학습 포인트).',
     '    예: "이런 패턴은 다른 컴포넌트에서 상태를 IPC로 받아올 때도 그대로 쓸 수 있어요"',
-    '  - 세 필드 모두 반드시 채워라(비워두지 말 것) — 대표 코드가 있는데 셋 중 뭔가 애매하면',
+    '  - conceptTags: 이 코드와 관련된 프로그래밍 개념 해시태그 1~3개(짧은 명사구, # 없이).',
+    '    예: ["비동기 처리", "에러 핸들링", "React 훅"]',
+    '  - 네 필드 모두 반드시 채워라(비워두지 말 것) — 대표 코드가 있는데 뭔가 애매하면',
     '    가장 그럴듯한 관점을 골라서라도 채워라.',
     '절대 길게 쓰지 마라 — 각 필드 한 문장, 화면에서 잘리지 않게 항상 짧게.',
     '반드시 아래 목록에 있는 stepId만 사용하고, 목록에 없는 id를 만들어내지 마.',
@@ -88,9 +90,10 @@ export const PROGRESS_SUMMARY_RESPONSE_SCHEMA: Schema = {
         properties: {
           explanation: { type: Type.STRING },
           importance: { type: Type.STRING },
-          application: { type: Type.STRING }
+          application: { type: Type.STRING },
+          conceptTags: { type: Type.ARRAY, items: { type: Type.STRING } }
         },
-        required: ['explanation', 'importance', 'application']
+        required: ['explanation', 'importance', 'application', 'conceptTags']
       }
     },
     required: ['stepId', 'summary']

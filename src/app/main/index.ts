@@ -251,7 +251,7 @@ const getCachedExplanationStmt = db.prepare(`
 const PROGRESS_HISTORY_LIMIT = 100
 const getRecentStepProgressStmt = db.prepare(`
   SELECT target_id, summary, key_code_snippet, key_code_lang, key_code_file, key_code_other_files,
-         key_code_explanation, key_code_importance, key_code_application, error_detail,
+         key_code_explanation, key_code_importance, key_code_application, concept_tags, error_detail,
          step_percent, status
   FROM ai_explanations
   WHERE target_type = 'step' AND step_percent IS NOT NULL
@@ -328,6 +328,7 @@ function registerIpcHandlers(): void {
       key_code_explanation: string | null
       key_code_importance: string | null
       key_code_application: string | null
+      concept_tags: string | null
       error_detail: string | null
       step_percent: number
       status: 'success' | 'failed' | null
@@ -347,7 +348,8 @@ function registerIpcHandlers(): void {
                 otherFiles: row.key_code_other_files ? JSON.parse(row.key_code_other_files) : [],
                 explanation: row.key_code_explanation,
                 importance: row.key_code_importance,
-                application: row.key_code_application
+                application: row.key_code_application,
+                conceptTags: row.concept_tags ? JSON.parse(row.concept_tags) : []
               }
             : null,
         errorDetail: row.error_detail,

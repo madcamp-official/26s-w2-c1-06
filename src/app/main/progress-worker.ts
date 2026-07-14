@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import type { AIProvider, StepInput } from '@ai/types'
-import { extractDiffSnippetLines } from '@ai/prompt-templates/explainBatchPrompt'
+import { extractDiffSnippetLines, summarizeRawPayload } from '@ai/prompt-templates/explainBatchPrompt'
 import type { AssistantNote, CodeUnitVersionWithUnit, SkillLevel, ToolEvent } from '@shared/types'
 import { groupIntoSteps, type Step } from '@shared/steps'
 import type { LiveStatus, ProgressKeyCode, ProgressUpdate, StepStatus } from '@shared/progress'
@@ -65,6 +65,14 @@ function fallbackSummaryFromNote(noteText: string | null | undefined): string {
 
 function langFor(filePath: string): string {
   return filePath.endsWith('.tsx') || filePath.endsWith('.ts') ? 'ts' : 'text'
+}
+
+const LIVE_STATUS_ARG_MAX_LENGTH = 50
+
+function truncateForLiveStatus(text: string): string {
+  return text.length > LIVE_STATUS_ARG_MAX_LENGTH
+    ? text.slice(0, LIVE_STATUS_ARG_MAX_LENGTH) + '…'
+    : text
 }
 
 // 스텝에 속한 실패 이벤트의 원본 에러 메시지를 그대로(요약 없이) 잘라서 보여준다 —
@@ -306,7 +314,8 @@ export function startProgressWorker(
         status === 'failed'
           ? '이 부분이 방금 실패의 원인이 된 지점이에요.'
           : '앞으로 이 코드 형태를 다른 곳에서도 다시 쓰게 되니 기억해두세요.',
-      application: '비슷한 변경을 할 때 이 코드 형태를 참고해보세요.'
+      application: '비슷한 변경을 할 때 이 코드 형태를 참고해보세요.',
+      conceptTags: [candidate.lang]
     }
   }
 
@@ -539,7 +548,16 @@ export function startProgressWorker(
 
     const lastEvent = inProgress.events[inProgress.events.length - 1]
     if (lastEvent) {
-      return { text: `${lastEvent.tool_name} · ${lastEvent.file_path ?? '파일 미지정'}`, idle: false }
+      // file_path는 Edit/Write류에만 있고 Bash/Grep/Task 등은 항상 null이라, 예전엔
+      // 이런 도구가 전부 "파일 미지정"으로만 떴다. raw_payload에서 실제 인자(명령어/
+      // 패턴 등)를 뽑아 대신 보여준다 — AI 캡션(explainBatchPrompt)과 같은 근거 재사용.
+      const target =
+        lastEvent.file_path ??
+        (() => {
+          const argSummary = summarizeRawPayload(lastEvent.tool_name, lastEvent.raw_payload)
+          return argSummary ? truncateForLiveStatus(argSummary) : '파일 미지정'
+        })()
+      return { text: `${lastEvent.tool_name} · ${target}`, idle: false }
     }
     if (inProgress.note) {
       return { text: `${fallbackSummaryFromNote(inProgress.note.text)} 준비 중`, idle: false }

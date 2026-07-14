@@ -411,27 +411,71 @@ body {
   opacity: 0.7;
 }
 
-.step-log__snippet {
-  margin: 0;
-  padding: 12px 14px;
+.step-log__diff {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.step-log__diff-side {
+  flex: 1 1 240px;
+  min-width: 0;
   border-radius: 8px;
-  background: color-mix(in srgb, canvasText 6%, transparent);
-  font-size: 14px;
+  overflow: hidden;
+}
+
+.step-log__diff-side pre {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
   line-height: 1.6;
   overflow-x: auto;
+  white-space: pre;
 }
 
-.step-log__snippet .diff-line {
-  display: block;
-  padding: 0 4px;
+.step-log__diff-side--remove {
+  background: color-mix(in srgb, #d1242f 16%, transparent);
+  border: 1px solid color-mix(in srgb, #d1242f 35%, transparent);
 }
 
-.step-log__snippet .diff-line--add {
-  background: color-mix(in srgb, #2ea043 20%, transparent);
+.step-log__diff-side--add {
+  background: color-mix(in srgb, #2ea043 16%, transparent);
+  border: 1px solid color-mix(in srgb, #2ea043 35%, transparent);
 }
 
-.step-log__snippet .diff-line--remove {
-  background: color-mix(in srgb, #d1242f 20%, transparent);
+.step-log__diff-label {
+  padding: 4px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+
+.step-log__diff-side--remove .step-log__diff-label {
+  background: color-mix(in srgb, #d1242f 30%, transparent);
+}
+
+.step-log__diff-side--add .step-log__diff-label {
+  background: color-mix(in srgb, #2ea043 30%, transparent);
+}
+
+.step-log__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.step-log__tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #58a6ff 18%, transparent);
+  color: color-mix(in srgb, #58a6ff 85%, canvasText);
 }
 
 .step-log__explain {

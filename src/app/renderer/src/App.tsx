@@ -103,7 +103,13 @@ function App() {
       </main>
       <section className="app__pane app__pane--full">
         <h2 className="app__pane-title">세션 리포트</h2>
-        <LectureNotesViewer notes={notes} onRegenerate={regenerate} />
+        {/* 리포트는 세션 종료 후에만 생기므로, 지금 세션(sessionId)이 아직 진행 중이면
+            이 목록엔 필연적으로 과거 세션들의 리포트만 있다 — 그걸 그대로 보여주면
+            "지금 세션은 안 끝났는데 리포트가 뜬다"는 오해를 준다. 지금 세션 것만 남긴다. */}
+        <LectureNotesViewer
+          notes={sessionId ? notes.filter((note) => note.session_id === sessionId) : []}
+          onRegenerate={regenerate}
+        />
       </section>
     </div>
   )

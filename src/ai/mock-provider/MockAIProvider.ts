@@ -115,7 +115,8 @@ export class MockAIProvider implements AIProvider {
                 failed > 0
                   ? '이 부분이 방금 실패의 원인이 된 지점이에요.'
                   : '앞으로 이 코드 형태를 다른 곳에서도 다시 쓰게 되니 기억해두세요.',
-              application: '비슷한 변경을 할 때 이 코드 형태를 참고해보세요.'
+              application: '비슷한 변경을 할 때 이 코드 형태를 참고해보세요.',
+              conceptTags: [step.codeCandidate.lang]
             }
           : null
       }

@@ -7,6 +7,7 @@ export interface ProgressKeyCode {
   explanation: string // 이 코드가 무엇인지
   importance: string // 이 코드가 중요한 이유
   application: string // 이 코드로 배우는 점(학습 포인트)
+  conceptTags: string[] // 관련 개념 해시태그(예: ["비동기", "에러 핸들링"])
 }
 
 export type StepStatus = 'success' | 'failed'

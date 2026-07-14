@@ -12,7 +12,9 @@ function truncate(text: string, max: number): string {
 // raw_payload(=ParsedToolUse 직렬화)에서 도구별로 학습에 의미 있는 실제 인자를 뽑는다.
 // "Bash를 실행했다" 대신 "npm install better-sqlite3를 실행했다"처럼 구체적인 캡션이
 // 나오게 하는 핵심 근거. 파싱 실패/미지원 도구는 조용히 null(도구 이름만으로 설명).
-function summarizeRawPayload(toolName: string, rawPayload: string | null): string | null {
+// progress-worker의 "지금 하는 중" 라이브 상태 줄도 이 함수를 재사용한다 —
+// Bash/Grep/Task 등 file_path가 없는 도구가 "파일 미지정"으로만 뜨는 문제를 고치기 위함.
+export function summarizeRawPayload(toolName: string, rawPayload: string | null): string | null {
   const rec = parseToolInput(rawPayload)
   if (!rec) return null
 

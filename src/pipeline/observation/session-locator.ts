@@ -8,11 +8,21 @@ export const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects'
 
 /**
  * Claude Code가 프로젝트 경로를 ~/.claude/projects/<hash> 디렉토리명으로 매핑하는 규칙.
- * 실물 디렉토리(c:\Users\...\FactCoding -> c--Users-...-FactCoding)를 열어 확인한 결과,
- * 경로 구분자(":", "\\", "/")를 전부 "-"로 치환하는 규칙임을 검증함.
+ * 이전 검증(project명에 밑줄이 없던 "FactCoding" 기준)은 구분자만 치환하면 되는 줄
+ * 알았지만, 실제로는 두 가지가 더 있었다 — 밑줄(언더스코어)이 있는 실제 폴더명
+ * (version_tts)으로 재검증한 결과 실물 디렉토리가 "c--Users-...-version-tts"였다:
+ *   1) 드라이브 문자만 소문자로 정규화(Windows 드라이브 문자는 대소문자 구분 없음
+ *      — 나머지 경로 대소문자는 그대로 유지, 즉 전체 lowercase가 아님)
+ *   2) 밑줄(_)도 구분자와 마찬가지로 "-"로 치환
+ * 이걸 놓치면 해시가 실물 디렉토리와 어긋나 findLatestSessionFile이 항상 null을
+ * 반환하고, 파이프라인이 세션 파일을 영영 못 찾아 관찰이 조용히 멈춘다(에러 없이
+ * 그냥 아무 tool_event도 안 쌓임 — manual-edit fallback만 계속 잡음).
  */
 export function projectPathToHash(projectPath: string): string {
-  return projectPath.replace(/[:\\/]/g, '-');
+  const withLowerDrive = /^[a-zA-Z]:/.test(projectPath)
+    ? projectPath[0].toLowerCase() + projectPath.slice(1)
+    : projectPath;
+  return withLowerDrive.replace(/[:\\/_]/g, '-');
 }
 
 export function getClaudeProjectDir(projectPath: string): string {

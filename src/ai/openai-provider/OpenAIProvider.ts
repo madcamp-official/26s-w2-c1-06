@@ -1,4 +1,5 @@
-import { GoogleGenAI, type Schema } from '@google/genai'
+import OpenAI from 'openai'
+import type { Schema } from '@google/genai'
 import type { AssistantNote, CodeUnitVersionWithUnit, SkillLevel, ToolEvent } from '@shared/types'
 import type { QuizLesson } from '@shared/quiz'
 import type {
@@ -11,7 +12,6 @@ import type {
   StepInput,
   VersionCaption
 } from '../types'
-import type { GeminiKeyPool } from '../key-pool/GeminiKeyPool'
 import { buildAnswerQuestionPrompt } from '../prompt-templates/answerQuestionPrompt'
 import { buildExplainBatchPrompt, EXPLAIN_BATCH_RESPONSE_SCHEMA } from '../prompt-templates/explainBatchPrompt'
 import {
@@ -24,11 +24,12 @@ import {
   PROGRESS_SUMMARY_RESPONSE_SCHEMA
 } from '../prompt-templates/progressSummaryPrompt'
 import { buildQuizPrompt, QUIZ_RESPONSE_SCHEMA } from '../prompt-templates/quizPrompt'
+import { wrapAsOpenAIJsonSchema } from './geminiSchemaToJsonSchema'
 
-// 'gemini-2.5-flash'는 이 프로젝트의 키 발급 시점 기준 신규 사용자에게 더 이상
-// 제공되지 않아(404), 구글이 계속 최신 무료 flash 모델을 가리키도록 유지하는
-// alias로 교체 — 특정 버전을 박아두면 같은 문제가 재발한다.
-const MODEL = 'gemini-flash-latest'
+// 'gemini-flash-latest'와 같은 취지 — 특정 스냅샷(예: gpt-5-mini-2025-08-07)을
+// 박아두면 그 스냅샷이 폐기됐을 때 404가 난다. 대신 롤링 alias를 기본값으로 쓰고,
+// 필요하면 코드 수정 없이 OPENAI_MODEL로 override 가능하게 한다.
+const DEFAULT_MODEL = 'gpt-5-mini'
 
 interface RawCaption {
   eventId?: string
@@ -95,15 +96,23 @@ function sanitizeKeyCode(raw: RawKeyCode | null | undefined): KeyCodeExplanation
   }
 }
 
-export class GeminiProvider implements AIProvider {
-  private readonly clients = new Map<string, GoogleGenAI>()
+// GeminiProvider와 동일한 AIProvider 계약을 구현한다. prompt-templates/*의
+// buildXxxPrompt + Xxx_RESPONSE_SCHEMA는 provider 중립적이라 그대로 재사용하고,
+// 여기서는 OpenAI Chat Completions(Structured Outputs)로 호출하는 부분만 다르다.
+export class OpenAIProvider implements AIProvider {
+  private readonly client: OpenAI
+  private readonly model: string
 
-  constructor(private readonly keyPool: GeminiKeyPool) {}
+  constructor(apiKey: string) {
+    this.client = new OpenAI({ apiKey })
+    this.model = process.env.OPENAI_MODEL ?? DEFAULT_MODEL
+  }
 
   async explainBatch(events: ToolEvent[], notes: AssistantNote[], skillLevel: SkillLevel): Promise<BatchCaption[]> {
     if (events.length === 0) return []
 
     const raw = await this.generateJson<RawCaption>(
+      'explain_batch',
       buildExplainBatchPrompt(events, notes, skillLevel),
       EXPLAIN_BATCH_RESPONSE_SCHEMA
     )
@@ -122,6 +131,7 @@ export class GeminiProvider implements AIProvider {
     if (steps.length === 0) return []
 
     const raw = await this.generateJson<RawProgressSummary>(
+      'progress_summary',
       buildProgressSummaryPrompt(steps, skillLevel),
       PROGRESS_SUMMARY_RESPONSE_SCHEMA
     )
@@ -143,6 +153,7 @@ export class GeminiProvider implements AIProvider {
     if (versions.length === 0) return []
 
     const raw = await this.generateJson<RawCaption>(
+      'explain_versions',
       buildExplainVersionsPrompt(versions, skillLevel),
       EXPLAIN_VERSIONS_RESPONSE_SCHEMA
     )
@@ -160,7 +171,11 @@ export class GeminiProvider implements AIProvider {
   async generateQuiz(versions: CodeUnitVersionWithUnit[], skillLevel: SkillLevel): Promise<QuizLesson[]> {
     if (versions.length === 0) return []
 
-    const raw = await this.generateJson<RawQuizLesson>(buildQuizPrompt(versions, skillLevel), QUIZ_RESPONSE_SCHEMA)
+    const raw = await this.generateJson<RawQuizLesson>(
+      'quiz',
+      buildQuizPrompt(versions, skillLevel),
+      QUIZ_RESPONSE_SCHEMA
+    )
     const versionById = new Map(versions.map((v) => [v.id, v]))
 
     return raw
@@ -182,14 +197,11 @@ export class GeminiProvider implements AIProvider {
 
   async synthesizeLectureNote(trace: SessionTrace, skillLevel: SkillLevel): Promise<string> {
     const prompt = buildLectureNotePrompt(trace, skillLevel)
-    const responseText = await this.keyPool.call(async (apiKey) => {
-      const response = await this.clientFor(apiKey).models.generateContent({
-        model: MODEL,
-        contents: prompt
-      })
-      return response.text
+    const response = await this.client.chat.completions.create({
+      model: this.model,
+      messages: [{ role: 'user', content: prompt }]
     })
-    return responseText ?? ''
+    return response.choices[0]?.message?.content ?? ''
   }
 
   async answerQuestion(
@@ -198,44 +210,33 @@ export class GeminiProvider implements AIProvider {
     skillLevel: SkillLevel
   ): Promise<string> {
     const prompt = buildAnswerQuestionPrompt(question, context, skillLevel)
-    const responseText = await this.keyPool.call(async (apiKey) => {
-      const response = await this.clientFor(apiKey).models.generateContent({
-        model: MODEL,
-        contents: prompt
-      })
-      return response.text
+    const response = await this.client.chat.completions.create({
+      model: this.model,
+      messages: [{ role: 'user', content: prompt }]
     })
-    return responseText ?? ''
+    return response.choices[0]?.message?.content ?? ''
   }
 
-  private async generateJson<T>(prompt: string, schema: Schema): Promise<T[]> {
-    const responseText = await this.keyPool.call(async (apiKey) => {
-      const response = await this.clientFor(apiKey).models.generateContent({
-        model: MODEL,
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: schema
-        }
-      })
-      return response.text
+  // 응답 스키마는 전부 최상위가 배열이라(Gemini 쪽 관례), strict 모드가 요구하는
+  // "최상위 object" 형태로 { items: [...] } 감싼 뒤 items만 꺼내 돌려준다.
+  private async generateJson<T>(schemaName: string, prompt: string, schema: Schema): Promise<T[]> {
+    const response = await this.client.chat.completions.create({
+      model: this.model,
+      messages: [{ role: 'user', content: prompt }],
+      response_format: {
+        type: 'json_schema',
+        json_schema: wrapAsOpenAIJsonSchema(schemaName, schema)
+      }
     })
 
-    if (!responseText) return []
+    const content = response.choices[0]?.message?.content
+    if (!content) return []
     try {
-      return JSON.parse(responseText)
+      const parsed = JSON.parse(content) as { items?: T[] }
+      return parsed.items ?? []
     } catch {
-      console.error('[GeminiProvider] failed to parse response as JSON:', responseText)
+      console.error('[OpenAIProvider] failed to parse response as JSON:', content)
       return []
     }
-  }
-
-  private clientFor(apiKey: string): GoogleGenAI {
-    let client = this.clients.get(apiKey)
-    if (!client) {
-      client = new GoogleGenAI({ apiKey })
-      this.clients.set(apiKey, client)
-    }
-    return client
   }
 }
