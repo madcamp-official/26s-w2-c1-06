@@ -31,10 +31,7 @@ export function useQna(sessionId: string | null, skillLevel: SkillLevel): UseQna
     if (!sessionId || !question.trim()) return
     setPending(true)
     try {
-      // 지금까지의 문답을 히스토리로 함께 넘겨서 "그건 왜?" 같은 후속 질문의 맥락이
-      // 이어지게 한다 — generateContent 자체는 무상태라 매 호출마다 다시 넣어야 한다.
-      const history = exchanges.map(({ question, answer }) => ({ question, answer }))
-      const answer = await window.factcoding.answerQuestion(sessionId, question, history, skillLevel)
+      const answer = await window.factcoding.answerQuestion(sessionId, question, skillLevel)
       setExchanges((prev) => [...prev, { id: crypto.randomUUID(), question, answer }])
     } finally {
       setPending(false)

@@ -1,15 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import type { AIProvider } from '@ai/types'
-import type {
-  CodeUnit,
-  CodeUnitEdge,
-  CodeUnitVersionWithUnit,
-  Prompt,
-  SkillLevel,
-  ToolEvent
-} from '@shared/types'
-import { serializeTurnNarrative } from '@shared/format'
+import type { CodeUnitVersionWithUnit, Prompt, SkillLevel, ToolEvent } from '@shared/types'
 
 const BATCH_SIZE = 5
 // 같은 턴 요약이 계속 실패하면(429 쿼터 소진, 프롬프트 초과 등) 틱마다 같은 턴만
@@ -52,7 +44,7 @@ export function startCaptionWorker(
   // 경우에도 그 세션의 턴 해설이 채워져야 한다(버전 요약이 이미 전역 대상인 것과 동일).
   // 최신 세션부터 처리해 라이브 화면이 항상 먼저 채워진다.
   const getNextCompletedTurn = db.prepare(`
-    SELECT p.*, s.project_id AS session_project_id FROM prompts p
+    SELECT p.* FROM prompts p
     JOIN sessions s ON s.id = p.session_id
     WHERE EXISTS (SELECT 1 FROM tool_events te WHERE te.prompt_id = p.id)
       AND NOT EXISTS (
@@ -69,26 +61,6 @@ export function startCaptionWorker(
 
   const getEventsForPrompt = db.prepare(`
     SELECT * FROM tool_events WHERE prompt_id = @prompt_id ORDER BY created_at ASC
-  `)
-
-  // 턴 해설이 "구조도를 짚어가며" 서술할 수 있게, 이 턴에서 바뀐 유닛 버전과
-  // 프로젝트 전체 구조도(유닛/엣지)를 함께 프롬프트 컨텍스트로 넘긴다.
-  const getVersionsForPrompt = db.prepare(`
-    SELECT v.*, u.unit_name, u.unit_type, u.file_path
-    FROM code_unit_versions v
-    JOIN code_units u ON u.id = v.unit_id
-    WHERE v.prompt_id = @prompt_id
-    ORDER BY v.created_at ASC
-  `)
-
-  const getProjectUnits = db.prepare(`
-    SELECT * FROM code_units WHERE project_id = @project_id ORDER BY file_path, unit_name
-  `)
-
-  const getProjectEdges = db.prepare(`
-    SELECT e.* FROM code_unit_edges e
-    JOIN code_units u ON u.id = e.from_unit_id
-    WHERE u.project_id = @project_id
   `)
 
   const getUncaptionedVersions = db.prepare(`
@@ -152,42 +124,17 @@ export function startCaptionWorker(
       const skillLevel = ((getSkillLevel.get() as { value: string } | undefined)?.value ??
         'intermediate') as SkillLevel
 
-      let completedTurn = getNextCompletedTurn.get({ skill_level: skillLevel }) as
-        | (Prompt & { session_project_id: string | null })
-        | undefined
+      let completedTurn = getNextCompletedTurn.get({ skill_level: skillLevel }) as Prompt | undefined
       if (completedTurn && (retryAfterByTurn.get(completedTurn.id) ?? 0) > Date.now()) {
         completedTurn = undefined // 쿨다운 중 — 이번 틱은 버전 요약이라도 처리한다
       }
 
       if (completedTurn) {
-        const projectId = completedTurn.session_project_id
         const events = getEventsForPrompt.all({ prompt_id: completedTurn.id }) as ToolEvent[]
-        const versions = getVersionsForPrompt.all({
-          prompt_id: completedTurn.id
-        }) as CodeUnitVersionWithUnit[]
-        const units = projectId
-          ? (getProjectUnits.all({ project_id: projectId }) as CodeUnit[])
-          : []
-        const edges = projectId
-          ? (getProjectEdges.all({ project_id: projectId }) as CodeUnitEdge[])
-          : []
 
         try {
-          const { summary, bubbles, conceptTags } = await aiProvider.explainTurn(
-            completedTurn,
-            events,
-            { versions, units, edges },
-            skillLevel
-          )
-          // 말풍선 배열은 기존 content 컬럼에 JSON으로 직렬화해 저장한다 —
-          // 렌더러는 parseTurnNarrative()로 읽고, 개편 전 평문 캐시도 폴백으로 소화한다.
-          saveExplanation(
-            'prompt',
-            completedTurn.id,
-            serializeTurnNarrative({ summary, bubbles }),
-            conceptTags,
-            skillLevel
-          )
+          const { caption, conceptTags } = await aiProvider.explainTurn(completedTurn, events, skillLevel)
+          saveExplanation('prompt', completedTurn.id, caption, conceptTags, skillLevel)
           onExplanationSaved?.()
         } catch (error) {
           retryAfterByTurn.set(completedTurn.id, Date.now() + FAILURE_COOLDOWN_MS)

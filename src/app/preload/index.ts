@@ -9,8 +9,7 @@ import type {
   OnboardingProfile,
   Project,
   Prompt,
-  QnaHistoryEntry,
-  Session,
+  SessionWithPreview,
   SkillLevel,
   ToolEvent
 } from '@shared/types'
@@ -26,6 +25,7 @@ const factcodingApi = {
   createProject: (name: string, workspacePath: string): Promise<Project> =>
     ipcRenderer.invoke('project:create', name, workspacePath),
   selectProjectFolder: (): Promise<string | null> => ipcRenderer.invoke('project:selectFolder'),
+  deleteProject: (projectId: string): Promise<void> => ipcRenderer.invoke('project:delete', projectId),
   getLatestSessionId: (projectId: string): Promise<string | null> =>
     ipcRenderer.invoke('db:getLatestSessionId', projectId),
   getToolEvents: (sessionId: string): Promise<ToolEvent[]> =>
@@ -63,13 +63,10 @@ const factcodingApi = {
     ipcRenderer.invoke('db:explainVersionOverride', versionId, skillLevel),
   regenerateLectureNote: (sessionId: string, skillLevel: SkillLevel): Promise<LectureNote | null> =>
     ipcRenderer.invoke('db:regenerateLectureNote', sessionId, skillLevel),
-  answerQuestion: (
-    sessionId: string,
-    question: string,
-    history: QnaHistoryEntry[],
-    skillLevel: SkillLevel
-  ): Promise<string> => ipcRenderer.invoke('db:answerQuestion', sessionId, question, history, skillLevel),
-  getSessions: (projectId: string): Promise<Session[]> => ipcRenderer.invoke('db:getSessions', projectId),
+  answerQuestion: (sessionId: string, question: string, skillLevel: SkillLevel): Promise<string> =>
+    ipcRenderer.invoke('db:answerQuestion', sessionId, question, skillLevel),
+  getSessions: (projectId: string): Promise<SessionWithPreview[]> =>
+    ipcRenderer.invoke('db:getSessions', projectId),
   startMonitoring: (projectId: string): Promise<void> =>
     ipcRenderer.invoke('pipeline:startMonitoring', projectId),
   completeMonitoring: (): Promise<void> => ipcRenderer.invoke('pipeline:completeMonitoring'),

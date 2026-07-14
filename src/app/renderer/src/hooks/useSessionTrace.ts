@@ -99,7 +99,7 @@ export function useSessionTrace(
     }
   }, [sessionId, pinnedSessionId, fetchTrace])
 
-  // 새 tool_event/prompt(trace)나 턴 해설(explanation)이 기록되면 즉시 반영.
+  // 새 tool_event/prompt(trace)나 프롬프트 해설(explanation)이 기록되면 즉시 반영.
   useDataChanged(['trace', 'explanation'], fetchTrace)
 
   return { sessionId, prompts, events, explanations, loading }

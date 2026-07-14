@@ -29,7 +29,7 @@ export function DifficultySlider({ value, onChange }: DifficultySliderProps) {
           <span
             key={level}
             className={`font-mono text-[9.5px] ${
-              i === index ? 'font-semibold text-[#9bdbbb]' : 'text-[#5f7682]'
+              i === index ? 'font-semibold text-[#3c7566]' : 'text-[#6d7069]'
             }`}
           >
             {SKILL_LEVEL_LABEL[level]}

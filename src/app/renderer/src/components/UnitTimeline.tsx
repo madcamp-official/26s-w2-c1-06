@@ -14,9 +14,9 @@ const CHANGE_LABEL: Record<string, string> = {
 }
 
 const CHANGE_BADGE: Record<string, string> = {
-  created: 'bg-[#193c35] text-[#91dfbf]',
-  modified: 'bg-[#382d1e] text-[#e7bd74]',
-  deleted: 'bg-[#3a2525] text-[#f49d91]'
+  created: 'bg-[#e4f0eb] text-[#245248]',
+  modified: 'bg-[#fdf3e3] text-[#9a805b]',
+  deleted: 'bg-[#fbe9e7] text-[#c65c52]'
 }
 
 // SPEC 5.1 항목별 오버라이드: "쉽게 설명해줘"/"더 자세히" 두 방향만 제공
@@ -67,7 +67,7 @@ export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
   }
 
   return (
-    <ol className="relative space-y-3 border-l border-[#29404a] pl-4">
+    <ol className="relative space-y-3 border-l border-[#e6e4dd] pl-4">
       {versions.map((version) => {
         const activeOverride = overrideLevel[version.id]
         const explanation = activeOverride
@@ -78,28 +78,28 @@ export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
         return (
           <li
             key={version.id}
-            className="relative rounded-xl border border-border bg-[#121d25] p-4"
+            className="relative rounded-xl border border-border bg-[#f6f5f1] p-4"
           >
-            <span className="absolute -left-[21.5px] top-5 size-2 rounded-full border border-[#4b8b75] bg-[#193c35]" />
+            <span className="absolute -left-[21.5px] top-5 size-2 rounded-full border border-[#4f9c84] bg-[#e4f0eb]" />
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-[11px] font-semibold text-[#c8f1dc]">
+              <span className="font-mono text-[11px] font-semibold text-[#245248]">
                 v{version.version_no}
               </span>
               <span
                 className={`rounded px-1.5 py-0.5 font-mono text-[9px] font-medium ${
-                  CHANGE_BADGE[version.change_type] ?? 'bg-[#1b2831] text-[#7d93a0]'
+                  CHANGE_BADGE[version.change_type] ?? 'bg-[#f1f0eb] text-[#6d7069]'
                 }`}
               >
                 {CHANGE_LABEL[version.change_type] ?? version.change_type}
               </span>
-              <span className="ml-auto font-mono text-[10px] text-[#536b76]">
+              <span className="ml-auto font-mono text-[10px] text-[#9a9a92]">
                 {formatTime(version.created_at)}
               </span>
             </div>
 
-            <div className="mt-2 text-[12.5px] leading-relaxed text-[#b9cad3]">
+            <div className="mt-2 text-[12.5px] leading-relaxed text-[#3f514c]">
               {pending || !explanation ? (
-                <span className="font-mono text-[11px] text-[#8fc9ae]">요약 생성 중…</span>
+                <span className="font-mono text-[11px] text-[#3c7566]">요약 생성 중…</span>
               ) : (
                 <>
                   <span>{explanation.content}</span>
@@ -107,7 +107,7 @@ export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
                     {parseConceptTags(explanation.concept_tags).map((tag) => (
                       <span
                         key={tag}
-                        className="rounded-md border border-[#2c4a41] bg-[#14251f] px-2 py-0.5 font-mono text-[10px] text-[#a9d3bd]"
+                        className="rounded-md border border-[#cfe3d8] bg-[#eef6f1] px-2 py-0.5 font-mono text-[10px] text-[#3c7566]"
                       >
                         {tag}
                       </span>
@@ -125,8 +125,8 @@ export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
                   onClick={() => toggleOverride(version.id, button.level)}
                   className={`rounded-md border px-2 py-1 text-[11px] transition ${
                     activeOverride === button.level
-                      ? 'border-[#326055] bg-[#1e3540] text-[#c7f5e0]'
-                      : 'border-border bg-transparent text-[#8299a4] hover:bg-[#15212a] hover:text-[#c3d2da]'
+                      ? 'border-[#b8d9ce] bg-[#eaf4ef] text-[#245248]'
+                      : 'border-border bg-transparent text-[#6d7069] hover:bg-[#f1f0eb] hover:text-[#373832]'
                   }`}
                 >
                   {button.label}
@@ -136,10 +136,10 @@ export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
 
             {version.diff_text && (
               <details className="group mt-3">
-                <summary className="cursor-pointer list-none font-mono text-[10px] tracking-[0.08em] text-[#6e8490] transition hover:text-[#8ed7ba] [&::-webkit-details-marker]:hidden">
+                <summary className="cursor-pointer list-none font-mono text-[10px] tracking-[0.08em] text-[#6d7069] transition hover:text-[#285c52] [&::-webkit-details-marker]:hidden">
                   ▸ DIFF 보기
                 </summary>
-                <pre className="mt-2 overflow-x-auto rounded-lg border border-[#22363f] bg-[#0d151c] p-3 font-mono text-[10.5px] leading-5 text-[#a9bdc7]">
+                <pre className="mt-2 overflow-x-auto rounded-lg border border-[#e6e4dd] bg-[#f6f5f1] p-3 font-mono text-[10.5px] leading-5 text-[#3f514c]">
                   {version.diff_text}
                 </pre>
               </details>

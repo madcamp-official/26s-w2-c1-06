@@ -7,6 +7,7 @@ interface UseProjectsResult {
   refresh: () => Promise<void>
   selectFolder: () => Promise<string | null>
   createProject: (name: string, workspacePath: string) => Promise<Project>
+  deleteProject: (projectId: string) => Promise<void>
 }
 
 // 프로젝트(코드베이스 단위 묶음) 목록 + 생성. 관제실/구조도/강의노트는 모두 여기서
@@ -33,5 +34,10 @@ export function useProjects(): UseProjectsResult {
     return project
   }
 
-  return { projects, loading, refresh, selectFolder, createProject }
+  const deleteProject = async (projectId: string): Promise<void> => {
+    await window.factcoding.deleteProject(projectId)
+    await refresh()
+  }
+
+  return { projects, loading, refresh, selectFolder, createProject, deleteProject }
 }

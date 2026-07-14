@@ -9,6 +9,13 @@ const POLL_INTERVAL_MS = 3000
 // 계속 두드린다 — 실패한 세션은 이 시간 동안 건너뛰고 다른 세션을 먼저 처리한다.
 const FAILURE_COOLDOWN_MS = 60_000
 
+// 프롬프트나 tool_event가 거의 없는 세션(예: "시작하기"를 누르자마자 바로 "완료"를
+// 누른 경우, 재개 직후 새 프롬프트 없이 다시 종료된 경우)은 AI에 넘길 실제 내용이
+// 없어서 "제공해주신 정보가 비어 있어 템플릿 형태로 작성합니다" 같은 의미 없는
+// 필러 노트만 나온다 — 최소한의 활동이 쌓인 세션만 강의노트를 합성한다.
+const MIN_PROMPTS_FOR_NOTE = 1
+const MIN_TOOL_EVENTS_FOR_NOTE = 1
+
 // SPEC 4.3.2: Stop 훅 → 파이프라인이 sessions.ended_at 기록 → 여기서 그 전이를
 // 감지해 강의노트를 합성한다. "아직 노트가 없는, 이미 종료된 세션"을 찾는
 // 방식으로 구현해 NULL→NOT NULL 전이를 직접 추적할 필요가 없다 (lecture_notes
@@ -42,12 +49,17 @@ export function startLectureNoteWorker(
 
   let running = false
   const retryAfterBySession = new Map<string, number>()
+  // 활동이 부족해 노트를 만들지 않기로 확정한 세션 — 종료된 세션은 이후로도 내용이
+  // 더 쌓이지 않으므로, 한 번 판단하면 매 틱마다 다시 로드해 재판단할 필요가 없다.
+  const insufficientSessionIds = new Set<string>()
 
   const tick = async (): Promise<void> => {
     if (running) return
     running = true
     try {
-      const endedSessions = getEndedSessionsWithoutNotes.all() as Session[]
+      const endedSessions = (getEndedSessionsWithoutNotes.all() as Session[]).filter(
+        (s) => !insufficientSessionIds.has(s.id)
+      )
 
       const skillLevel = ((getSkillLevel.get() as { value: string } | undefined)?.value ??
         'intermediate') as SkillLevel
@@ -60,6 +72,14 @@ export function startLectureNoteWorker(
       try {
         const trace = loadSessionTrace(session.id)
         if (!trace) return
+
+        if (
+          trace.prompts.length < MIN_PROMPTS_FOR_NOTE ||
+          trace.toolEvents.length < MIN_TOOL_EVENTS_FOR_NOTE
+        ) {
+          insufficientSessionIds.add(session.id)
+          return
+        }
 
         const markdown = await aiProvider.synthesizeLectureNote(trace, skillLevel)
 

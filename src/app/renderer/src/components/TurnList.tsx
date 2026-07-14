@@ -1,5 +1,4 @@
-import { Bot, ChevronRight, Loader2 } from 'lucide-react'
-import type { AiExplanation, Prompt, ToolEvent } from '@shared/types'
+import type { Prompt, ToolEvent } from '@shared/types'
 
 // 프롬프트에 연결되지 않은 이벤트(수동 수정 등, SPEC 4.1 fallback)를 가리키는 고정 키 —
 // 실제 prompt.id(UUID)와 충돌하지 않는다.
@@ -13,18 +12,12 @@ export interface TurnListItem {
   isLastTurn: boolean
 }
 
-interface TurnListProps {
-  prompts: Prompt[]
-  events: ToolEvent[]
-  explanations: Map<string, AiExplanation>
-  loading: boolean
-  selectedTurnId: string | null
-  onSelectTurn: (turnId: string) => void
-}
-
-// tool_events를 턴(prompt) 단위로 묶어 "코딩 수정이 완료된 단위"만 목록으로 보여준다.
-// 여기서는 개별 Read/Write/Bash를 나열하지 않고 턴 자체를 고르는 선택자 역할만 한다 —
-// 구조도·변경사항·요약은 오른쪽 TurnDetailPanel에서 선택된 턴 기준으로 크게 보여준다.
+// tool_events를 프롬프트 단위로 묶어 "코딩 수정이 완료된 단위"만 뽑아낸다 — 개별
+// Read/Write/Bash를 나열하지 않고 프롬프트 하나하나를 가리키는 데이터만 만든다.
+// 실제 목록 UI는 RecentTurns(개요 탭 "직전 실행의 과정")가 담당하고, App.tsx는 이
+// 결과로 "기본으로 보여줄 프롬프트"를 계산한다 — 여기는 순수 데이터 가공만 한다
+// (예전엔 이 파일이 "턴 목록" 패널 자체도 그렸지만, 사이드바 "지난 프롬프트" 목록과
+// 겹쳐 보여서 그 UI는 제거했다).
 export function buildTurnList(prompts: Prompt[], events: ToolEvent[]): TurnListItem[] {
   const promptIds = new Set(prompts.map((p) => p.id))
   const countByPrompt = new Map<string, number>()
@@ -61,90 +54,4 @@ export function buildTurnList(prompts: Prompt[], events: ToolEvent[]): TurnListI
   }
 
   return items
-}
-
-export function TurnList({
-  prompts,
-  events,
-  explanations,
-  loading,
-  selectedTurnId,
-  onSelectTurn
-}: TurnListProps) {
-  const items = buildTurnList(prompts, events)
-
-  return (
-    <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card shadow-[0_18px_45px_rgba(0,0,0,.14)]">
-      <div className="flex items-center gap-3 border-b border-border px-4 py-3.5">
-        <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#20323a] text-[#a5e7cb]">
-          <Bot size={17} />
-        </div>
-        <div>
-          <h3 className="text-[13px] font-semibold">턴 목록</h3>
-          <p className="font-mono text-[10px] text-[#75909a]">
-            {String(items.length).padStart(2, '0')} TURNS · 선택해서 상세 보기
-          </p>
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="px-5 py-10 text-center text-[13px] text-muted-foreground">
-          세션을 불러오는 중…
-        </div>
-      ) : items.length === 0 ? (
-        <div className="px-5 py-10 text-center text-[13px] leading-6 text-muted-foreground">
-          아직 표시할 활동이 없습니다. 헤더의 &quot;시작하기&quot;를 눌러 모니터링을 시작하세요.
-        </div>
-      ) : (
-        <div className="max-h-[640px] overflow-y-auto p-2.5">
-          {items.map((item) => {
-            const explanation = item.turnId === ORPHAN_TURN_ID ? undefined : explanations.get(item.turnId)
-            const active = selectedTurnId === item.turnId
-            return (
-              <button
-                key={item.turnId}
-                type="button"
-                onClick={() => onSelectTurn(item.turnId)}
-                className={`mb-1.5 flex w-full items-start gap-2.5 rounded-lg border p-3 text-left transition ${
-                  active
-                    ? 'border-[#4b8b75] bg-[#193c35]'
-                    : 'border-transparent bg-[#121d25] hover:border-[#2c4a41] hover:bg-[#15212a]'
-                }`}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex items-center gap-1.5">
-                    {item.turnIndex !== null ? (
-                      <span className="rounded bg-[#1d2f38] px-1.5 py-0.5 font-mono text-[9px] font-medium tracking-[0.08em] text-[#8fc9ae]">
-                        TURN {item.turnIndex + 1}
-                      </span>
-                    ) : (
-                      <span className="rounded bg-[#31443f] px-1.5 py-0.5 font-mono text-[9px] text-[#bde9d1]">
-                        수동 수정
-                      </span>
-                    )}
-                    {item.isLastTurn && !explanation && (
-                      <span className="flex items-center gap-1 font-mono text-[9px] text-[#f5a49a]">
-                        <Loader2 size={9} className="animate-spin" />
-                        진행 중
-                      </span>
-                    )}
-                  </div>
-                  <p className="truncate text-[12.5px] text-[#c3d2da]">
-                    {item.userText ?? '연결된 요청 없음'}
-                  </p>
-                  <p className="mt-1 font-mono text-[10px] text-[#5f7682]">
-                    {item.eventCount}개 작업{explanation ? ' · 요약 완료' : ''}
-                  </p>
-                </div>
-                <ChevronRight
-                  size={14}
-                  className={`mt-1 shrink-0 ${active ? 'text-[#8ed7ba]' : 'text-[#40545e]'}`}
-                />
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
 }

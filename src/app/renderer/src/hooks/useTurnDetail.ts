@@ -10,8 +10,8 @@ interface UseTurnDetailResult {
   explanations: Map<string, AiExplanation>
 }
 
-// 관제실의 "턴 상세" 화면: 선택된 턴에서 실제로 바뀐 코드 유닛 버전(diff)과 그
-// 버전들의 Level 3 해설을 턴 단위로 가져온다. promptId가 null이면 프롬프트에
+// 관제실의 "프롬프트 상세" 화면: 선택된 프롬프트에서 실제로 바뀐 코드 유닛 버전(diff)과 그
+// 버전들의 Level 3 해설을 프롬프트 단위로 가져온다. promptId가 null이면 프롬프트에
 // 연결되지 않은 수동 수정(SPEC 4.1 fallback)을 대신 조회한다.
 export function useTurnDetail(
   sessionId: string | null,
@@ -50,7 +50,7 @@ export function useTurnDetail(
     return () => clearInterval(timer)
   }, [sessionId, fetchDetail])
 
-  // 이 턴의 코드 유닛 버전(diff)이나 그 해설이 새로 기록되면 즉시 반영.
+  // 이 프롬프트의 코드 유닛 버전(diff)이나 그 해설이 새로 기록되면 즉시 반영.
   useDataChanged(['code-units', 'explanation'], fetchDetail)
 
   return { versions, explanations }

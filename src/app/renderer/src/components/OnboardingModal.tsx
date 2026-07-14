@@ -41,8 +41,8 @@ function Chip({
       onClick={onClick}
       className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12.5px] transition ${
         active
-          ? 'border-[#4b8b75] bg-[#193c35] text-[#c7f5e0]'
-          : 'border-border bg-[#121d25] text-[#9db0ba] hover:border-[#326055] hover:text-[#c3d2da]'
+          ? 'border-[#4f9c84] bg-[#e4f0eb] text-[#245248]'
+          : 'border-border bg-[#f6f5f1] text-[#6d7069] hover:border-[#b8d9ce] hover:text-[#373832]'
       }`}
     >
       {active && <Check size={12} />}
@@ -118,10 +118,10 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-[#05090d]/80 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-[560px] rounded-xl border border-border bg-card shadow-[0_24px_60px_rgba(0,0,0,.45)]">
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#21221f]/80 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-[560px] rounded-xl border border-border bg-card shadow-[0_24px_60px_rgba(33,34,31,.2)]">
         <div className="flex items-center gap-3 border-b border-border p-6 pb-5">
-          <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#a1e2c5] text-[#092018]">
+          <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#285c52] text-[#ffffff]">
             <BrainCircuit size={19} strokeWidth={2.3} />
           </div>
           <div className="min-w-0 flex-1">
@@ -138,16 +138,16 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
               <div
                 className={`grid size-6 shrink-0 place-items-center rounded-full font-mono text-[10.5px] font-medium ${
                   i < step
-                    ? 'bg-[#4b8b75] text-[#092018]'
+                    ? 'bg-[#4f9c84] text-[#ffffff]'
                     : i === step
-                      ? 'bg-[#9fe2c4] text-[#092018]'
-                      : 'bg-[#1b2b32] text-[#5f7682]'
+                      ? 'bg-[#285c52] text-[#ffffff]'
+                      : 'bg-[#f1f0eb] text-[#6d7069]'
                 }`}
               >
                 {i < step ? <Check size={13} /> : i + 1}
               </div>
               <span
-                className={`text-[11.5px] ${i === step ? 'font-medium text-[#dce8ed]' : 'text-[#5f7682]'}`}
+                className={`text-[11.5px] ${i === step ? 'font-medium text-[#21221f]' : 'text-[#6d7069]'}`}
               >
                 {label}
               </span>
@@ -159,11 +159,11 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
         <div className="min-h-[280px] px-6 py-5">
           {step === 0 && (
             <div>
-              <p className="mb-3 flex items-center gap-2 text-[12px] font-medium text-[#9db0ba]">
-                <BookOpen size={14} className="text-[#8cc8e6]" />
+              <p className="mb-3 flex items-center gap-2 text-[12px] font-medium text-[#6d7069]">
+                <BookOpen size={14} className="text-[#5b8fae]" />
                 들은 적 있는 과목을 모두 골라주세요 (KAIST 전산학부 교육과정 기준)
               </p>
-              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-[#5f7682]">
+              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-[#6d7069]">
                 전공필수
               </p>
               <div className="mb-4 flex flex-wrap gap-1.5">
@@ -173,7 +173,7 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
                   </Chip>
                 ))}
               </div>
-              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-[#5f7682]">
+              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-[#6d7069]">
                 주요 전공선택
               </p>
               <div className="mb-4 flex flex-wrap gap-1.5">
@@ -183,7 +183,7 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
                   </Chip>
                 ))}
               </div>
-              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-[#5f7682]">
+              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-[#6d7069]">
                 그 외 들은 과목 직접 추가
               </p>
               <div className="mb-2 flex gap-2">
@@ -197,12 +197,12 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
                     }
                   }}
                   placeholder="예: 컴파일러, 딥러닝개론"
-                  className="min-w-0 flex-1 rounded-lg border border-border bg-input-background px-3 py-1.5 text-[12.5px] text-foreground placeholder:text-[#5f7682] focus:outline-none focus:ring-1 focus:ring-ring/60"
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-input-background px-3 py-1.5 text-[12.5px] text-foreground placeholder:text-[#6d7069] focus:outline-none focus:ring-1 focus:ring-ring/60"
                 />
                 <button
                   type="button"
                   onClick={addCustomCourse}
-                  className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#1e3540] text-[#c7f5e0] transition hover:bg-[#274252]"
+                  className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#eaf4ef] text-[#245248] transition hover:bg-[#e4f0eb]"
                 >
                   <Plus size={15} />
                 </button>
@@ -212,13 +212,13 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
                   {customCourses.map((course) => (
                     <span
                       key={course}
-                      className="flex items-center gap-1 rounded-full border border-[#326055] bg-[#14231f] px-2.5 py-1 text-[11.5px] text-[#c7f5e0]"
+                      className="flex items-center gap-1 rounded-full border border-[#b8d9ce] bg-[#eaf4ef] px-2.5 py-1 text-[11.5px] text-[#245248]"
                     >
                       {course}
                       <button
                         type="button"
                         onClick={() => setCustomCourses((prev) => prev.filter((c) => c !== course))}
-                        className="text-[#7fa593] hover:text-[#f49d91]"
+                        className="text-[#5c7a6d] hover:text-[#c65c52]"
                       >
                         <X size={11} />
                       </button>
@@ -231,8 +231,8 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
 
           {step === 1 && (
             <div>
-              <p className="mb-2.5 flex items-center gap-2 text-[12px] font-medium text-[#9db0ba]">
-                <Rocket size={14} className="text-[#e7bd74]" />
+              <p className="mb-2.5 flex items-center gap-2 text-[12px] font-medium text-[#6d7069]">
+                <Rocket size={14} className="text-[#9a805b]" />
                 직접 진행한 프로젝트는 몇 개인가요?
               </p>
               <div className="mb-5 grid grid-cols-4 gap-2">
@@ -243,8 +243,8 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
                     onClick={() => setProjectBucket(option.value)}
                     className={`rounded-lg border px-2 py-2.5 text-center text-[12.5px] transition ${
                       projectBucket === option.value
-                        ? 'border-[#4b8b75] bg-[#193c35] font-medium text-[#c7f5e0]'
-                        : 'border-border bg-[#121d25] text-[#9db0ba] hover:border-[#326055]'
+                        ? 'border-[#4f9c84] bg-[#e4f0eb] font-medium text-[#245248]'
+                        : 'border-border bg-[#f6f5f1] text-[#6d7069] hover:border-[#b8d9ce]'
                     }`}
                   >
                     {option.label}
@@ -252,7 +252,7 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
                 ))}
               </div>
 
-              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-[#5f7682]">
+              <p className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.1em] text-[#6d7069]">
                 사용해본 기술 스택
               </p>
               <div className="mb-3 flex flex-wrap gap-1.5">
@@ -273,12 +273,12 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
                     }
                   }}
                   placeholder="예: Rust, GraphQL"
-                  className="min-w-0 flex-1 rounded-lg border border-border bg-input-background px-3 py-1.5 text-[12.5px] text-foreground placeholder:text-[#5f7682] focus:outline-none focus:ring-1 focus:ring-ring/60"
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-input-background px-3 py-1.5 text-[12.5px] text-foreground placeholder:text-[#6d7069] focus:outline-none focus:ring-1 focus:ring-ring/60"
                 />
                 <button
                   type="button"
                   onClick={addCustomStack}
-                  className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#1e3540] text-[#c7f5e0] transition hover:bg-[#274252]"
+                  className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#eaf4ef] text-[#245248] transition hover:bg-[#e4f0eb]"
                 >
                   <Plus size={15} />
                 </button>
@@ -288,13 +288,13 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
                   {customStack.map((tech) => (
                     <span
                       key={tech}
-                      className="flex items-center gap-1 rounded-full border border-[#326055] bg-[#14231f] px-2.5 py-1 text-[11.5px] text-[#c7f5e0]"
+                      className="flex items-center gap-1 rounded-full border border-[#b8d9ce] bg-[#eaf4ef] px-2.5 py-1 text-[11.5px] text-[#245248]"
                     >
                       {tech}
                       <button
                         type="button"
                         onClick={() => setCustomStack((prev) => prev.filter((t) => t !== tech))}
-                        className="text-[#7fa593] hover:text-[#f49d91]"
+                        className="text-[#5c7a6d] hover:text-[#c65c52]"
                       >
                         <X size={11} />
                       </button>
@@ -307,8 +307,8 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
 
           {step === 2 && (
             <div>
-              <p className="mb-3 flex items-center gap-2 text-[12px] font-medium text-[#9db0ba]">
-                <Compass size={14} className="text-[#94d6b7]" />
+              <p className="mb-3 flex items-center gap-2 text-[12px] font-medium text-[#6d7069]">
+                <Compass size={14} className="text-[#3c7566]" />
                 전반적으로 어떤 방식의 설명이 좋으세요?
               </p>
               <div className="space-y-2">
@@ -319,19 +319,19 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
                     onClick={() => setStyle(option.value)}
                     className={`flex w-full items-center gap-3 rounded-lg border p-3.5 text-left transition ${
                       style === option.value
-                        ? 'border-[#4b8b75] bg-[#193c35]'
-                        : 'border-border bg-[#121d25] hover:border-[#326055] hover:bg-[#14231f]'
+                        ? 'border-[#4f9c84] bg-[#e4f0eb]'
+                        : 'border-border bg-[#f6f5f1] hover:border-[#b8d9ce] hover:bg-[#eaf4ef]'
                     }`}
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[13.5px] font-semibold text-[#dce8ed]">
+                      <span className="block text-[13.5px] font-semibold text-[#21221f]">
                         {option.title}
                       </span>
-                      <span className="mt-0.5 block text-[11.5px] leading-5 text-[#8297a1]">
+                      <span className="mt-0.5 block text-[11.5px] leading-5 text-[#6d7069]">
                         {option.desc}
                       </span>
                     </span>
-                    {style === option.value && <Check size={16} className="shrink-0 text-[#8ed7ba]" />}
+                    {style === option.value && <Check size={16} className="shrink-0 text-[#285c52]" />}
                   </button>
                 ))}
               </div>
@@ -344,7 +344,7 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
             type="button"
             onClick={goBack}
             disabled={step === 0}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12.5px] text-[#9db0ba] transition hover:bg-[#152129] disabled:pointer-events-none disabled:opacity-0"
+            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-[12.5px] text-[#6d7069] transition hover:bg-[#f1f0eb] disabled:pointer-events-none disabled:opacity-0"
           >
             <ChevronLeft size={15} />
             이전
@@ -354,7 +354,7 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
               type="button"
               onClick={goNext}
               disabled={!canNext}
-              className="flex items-center gap-1.5 rounded-lg bg-[#9fe2c4] px-4 py-2 text-[12.5px] font-semibold text-[#0d251b] transition hover:bg-[#b4edcf] disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg bg-[#285c52] px-4 py-2 text-[12.5px] font-semibold text-[#ffffff] transition hover:bg-[#1f4a41] disabled:cursor-not-allowed disabled:opacity-40"
             >
               다음
               <ChevronRight size={15} />
@@ -364,7 +364,7 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
               type="button"
               onClick={finish}
               disabled={!canFinish}
-              className="flex items-center gap-1.5 rounded-lg bg-[#9fe2c4] px-4 py-2 text-[12.5px] font-semibold text-[#0d251b] transition hover:bg-[#b4edcf] disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg bg-[#285c52] px-4 py-2 text-[12.5px] font-semibold text-[#ffffff] transition hover:bg-[#1f4a41] disabled:cursor-not-allowed disabled:opacity-40"
             >
               시작하기
               <Check size={15} />

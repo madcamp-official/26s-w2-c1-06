@@ -54,6 +54,12 @@ export interface Session {
   ended_at: string | null
 }
 
+// 사이드바의 "지난 턴" 목록처럼 세션을 커밋 해시 대신 실제 프롬프트 내용으로 식별해
+// 보여줄 때 쓰는 조인 결과 (main의 getAllSessions 쿼리 반환 형태).
+export interface SessionWithPreview extends Session {
+  first_prompt_text: string | null
+}
+
 export interface Prompt {
   id: string
   session_id: string
@@ -133,13 +139,6 @@ export interface UserSetting {
   value: string | null
 }
 
-// 같은 세션 안의 직전 문답 — generateContent는 무상태라 "이전 질문 기억"을 흉내내려면
-// 매 호출마다 히스토리를 프롬프트에 명시적으로 다시 넣어야 한다(Q&A 챗, ai/types.ts AIProvider).
-export interface QnaHistoryEntry {
-  question: string
-  answer: string
-}
-
 // SPEC 4.6 "파이프라인 이벤트 → IPC push": main이 DB를 갱신할 때마다 이 중 하나의
 // kind로 렌더러에 push해 즉시 재조회를 트리거한다. 렌더러의 폴링은 이 push를 놓친
 // 경우(리스너 등록 전 이벤트, 예외 등)의 안전망으로 더 느린 주기로 계속 남겨둔다.
@@ -149,24 +148,6 @@ export type DataChangeKind =
   | 'explanation' // ai_explanations upsert (턴 해설, 유닛 버전 해설)
   | 'lecture-note' // lecture_notes insert (강의노트 자동 합성)
   | 'session' // sessions insert/update (started_at/ended_at, 모니터링 상태)
-
-// 턴 해설의 "말풍선" 한 개. 강사가 칠판(구조도) 앞에서 설명하듯,
-// overview(전체 구조에서 이번 턴의 위치) → change(바뀐 내용 서술식 해설)
-// → concept(알아야 할 개념/자료구조/알고리즘) 순서로 여러 개가 이어진다.
-export type TurnBubbleKind = 'overview' | 'change' | 'concept'
-
-export interface TurnNarrativeBubble {
-  kind: TurnBubbleKind
-  title: string | null
-  text: string
-}
-
-// target_type='prompt'인 ai_explanations.content에 JSON으로 직렬화되는 형태.
-// summary는 목록/헤더용 한 줄 요약, bubbles가 실제 해설 본문.
-export interface TurnNarrative {
-  summary: string
-  bubbles: TurnNarrativeBubble[]
-}
 
 // --- 아래는 Person A(파이프라인) 전용 타입: JSONL 트랜스크립트 파싱 결과와
 // 파이프라인 진입점 인터페이스. 위 DB 행 타입들과 달리 스키마 테이블에 직접

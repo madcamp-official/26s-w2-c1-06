@@ -1,18 +1,10 @@
 import { GoogleGenAI, type Schema } from '@google/genai'
-import type {
-  CodeUnitVersionWithUnit,
-  Prompt,
-  SkillLevel,
-  ToolEvent,
-  TurnBubbleKind
-} from '@shared/types'
+import type { CodeUnitVersionWithUnit, Prompt, SkillLevel, ToolEvent } from '@shared/types'
 import type {
   AIProvider,
   ContextBundle,
-  QnaHistoryEntry,
   SessionTrace,
   TurnCaption,
-  TurnContext,
   VersionCaption
 } from '../types'
 import type { GeminiKeyPool } from '../key-pool/GeminiKeyPool'
@@ -46,12 +38,9 @@ interface RawVersionCaption {
 }
 
 interface RawTurnCaption {
-  summary?: string
-  bubbles?: Array<{ kind?: string; title?: string; text?: string }>
+  caption?: string
   conceptTags?: string[]
 }
-
-const BUBBLE_KINDS = new Set<TurnBubbleKind>(['overview', 'change', 'concept'])
 
 export class GeminiProvider implements AIProvider {
   private readonly clients = new Map<string, GoogleGenAI>()
@@ -60,32 +49,18 @@ export class GeminiProvider implements AIProvider {
 
   constructor(private readonly keyPool: GeminiKeyPool) {}
 
-  async explainTurn(
-    prompt: Prompt,
-    events: ToolEvent[],
-    context: TurnContext,
-    skillLevel: SkillLevel
-  ): Promise<TurnCaption> {
-    if (events.length === 0) return { promptId: prompt.id, summary: '', bubbles: [], conceptTags: [] }
+  async explainTurn(prompt: Prompt, events: ToolEvent[], skillLevel: SkillLevel): Promise<TurnCaption> {
+    if (events.length === 0) return { promptId: prompt.id, caption: '', conceptTags: [] }
 
     const raw = await this.generateJson<RawTurnCaption>(
-      buildExplainTurnPrompt(prompt, events, context, skillLevel),
+      buildExplainTurnPrompt(prompt, events, skillLevel),
       EXPLAIN_TURN_RESPONSE_SCHEMA,
       {}
     )
 
-    const bubbles = (raw.bubbles ?? [])
-      .filter((b) => typeof b.text === 'string' && b.text.length > 0)
-      .map((b) => ({
-        kind: BUBBLE_KINDS.has(b.kind as TurnBubbleKind) ? (b.kind as TurnBubbleKind) : 'change',
-        title: b.title && b.title.length > 0 ? b.title : null,
-        text: b.text as string
-      }))
-
     return {
       promptId: prompt.id,
-      summary: raw.summary ?? '',
-      bubbles,
+      caption: raw.caption ?? '',
       conceptTags: raw.conceptTags ?? []
     }
   }
@@ -117,13 +92,8 @@ export class GeminiProvider implements AIProvider {
     return (await this.generateText(prompt)) ?? ''
   }
 
-  async answerQuestion(
-    question: string,
-    context: ContextBundle,
-    history: QnaHistoryEntry[],
-    skillLevel: SkillLevel
-  ): Promise<string> {
-    const prompt = buildAnswerQuestionPrompt(question, context, history, skillLevel)
+  async answerQuestion(question: string, context: ContextBundle, skillLevel: SkillLevel): Promise<string> {
+    const prompt = buildAnswerQuestionPrompt(question, context, skillLevel)
     return (await this.generateText(prompt)) ?? ''
   }
 

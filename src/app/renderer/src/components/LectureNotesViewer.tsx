@@ -43,7 +43,7 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
   if (notes.length === 0) {
     return (
       <div className="grid place-items-center rounded-xl border border-border bg-card px-6 py-16 text-center">
-        <BookOpen size={28} className="mb-3 text-[#40545e]" />
+        <BookOpen size={28} className="mb-3 text-[#9a9a92]" />
         <p className="max-w-[420px] text-[13px] leading-6 text-muted-foreground">
           아직 종료된 세션이 없습니다. 세션이 끝나면(완료 버튼 또는 Stop 훅 감지) 자동으로
           강의노트가 생성됩니다.
@@ -61,10 +61,10 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
         return (
           <section
             key={group.sessionId}
-            className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_18px_45px_rgba(0,0,0,.14)]"
+            className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_3px_14px_rgba(42,46,38,.06)]"
           >
             <div className="flex flex-wrap items-center gap-3 border-b border-border px-5 py-3.5">
-              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#75909a]">
+              <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#6d7069]">
                 SESSION / {group.sessionId.slice(0, 8)}
               </span>
               <div className="ml-auto flex gap-1.5">
@@ -84,7 +84,7 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
                           setPendingKey(null)
                         }
                       }}
-                      className="flex items-center gap-1.5 rounded-md border border-border bg-[#121d25] px-2.5 py-1.5 text-[11px] text-[#9db0ba] transition hover:bg-[#1b2a33] hover:text-[#c8f1dc] disabled:opacity-50"
+                      className="flex items-center gap-1.5 rounded-md border border-border bg-[#f6f5f1] px-2.5 py-1.5 text-[11px] text-[#6d7069] transition hover:bg-[#f1f0eb] hover:text-[#245248] disabled:opacity-50"
                     >
                       <RefreshCw size={11} className={pending ? 'animate-spin' : undefined} />
                       {pending ? '생성 중…' : `${SKILL_LABEL[level]}로도 보기`}
@@ -98,10 +98,10 @@ export function LectureNotesViewer({ notes, onRegenerate }: LectureNotesViewerPr
               {group.notes.map((note) => (
                 <article key={note.id} className="px-5 py-4">
                   <header className="mb-3 flex items-center gap-2">
-                    <span className="rounded bg-[#1e3540] px-2 py-0.5 text-[11px] font-semibold text-[#c7f5e0]">
+                    <span className="rounded bg-[#eaf4ef] px-2 py-0.5 text-[11px] font-semibold text-[#245248]">
                       {SKILL_LABEL[note.skill_level] ?? note.skill_level}
                     </span>
-                    <span className="font-mono text-[10px] text-[#536b76]">
+                    <span className="font-mono text-[10px] text-[#9a9a92]">
                       {formatTime(note.created_at)}
                     </span>
                   </header>

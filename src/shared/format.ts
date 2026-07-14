@@ -1,5 +1,3 @@
-import type { TurnBubbleKind, TurnNarrative, TurnNarrativeBubble } from './types'
-
 export function formatDuration(ms: number | null): string {
   if (ms == null) return '—'
   if (ms < 1000) return `${ms}ms`
@@ -11,6 +9,24 @@ export function formatTime(iso: string | null): string {
   return new Date(iso).toLocaleTimeString('ko-KR', { hour12: false })
 }
 
+// "직전 실행의 과정" 등 데모 톤의 타임라인 리스트용 — 초 단위 정밀도 대신
+// "방금 전"/"n분 전" 식의 상대 시각으로 보여준다. formatTime은 절대 시각이
+// 필요한 곳(활동 탭 상세 등)에서 그대로 계속 쓴다.
+export function formatRelativeTime(iso: string | null): string {
+  if (!iso) return '—'
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return '—'
+  const diffMs = Date.now() - then
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return '방금 전'
+  if (diffMin < 60) return `${diffMin}분 전`
+  const diffHour = Math.floor(diffMin / 60)
+  if (diffHour < 24) return `${diffHour}시간 전`
+  const diffDay = Math.floor(diffHour / 24)
+  if (diffDay < 7) return `${diffDay}일 전`
+  return new Date(iso).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })
+}
+
 export function parseConceptTags(json: string | null): string[] {
   if (!json) return []
   try {
@@ -18,42 +34,5 @@ export function parseConceptTags(json: string | null): string[] {
     return Array.isArray(parsed) ? parsed.filter((tag): tag is string => typeof tag === 'string') : []
   } catch {
     return []
-  }
-}
-
-const NARRATIVE_FORMAT = 'turn-narrative-v1'
-const BUBBLE_KINDS: TurnBubbleKind[] = ['overview', 'change', 'concept']
-
-export function serializeTurnNarrative(narrative: TurnNarrative): string {
-  return JSON.stringify({ format: NARRATIVE_FORMAT, ...narrative })
-}
-
-// content가 새 포맷(JSON)이면 말풍선 배열로, 개편 전에 캐시된 평문 요약이면
-// overview 말풍선 하나로 감싸서 돌려준다 — 기존 ai_explanations 캐시를 그대로 살린다.
-export function parseTurnNarrative(content: string): TurnNarrative {
-  const fallback: TurnNarrative = {
-    summary: content,
-    bubbles: content ? [{ kind: 'overview', title: null, text: content }] : []
-  }
-
-  try {
-    const parsed = JSON.parse(content)
-    if (parsed?.format !== NARRATIVE_FORMAT || !Array.isArray(parsed.bubbles)) return fallback
-
-    const bubbles: TurnNarrativeBubble[] = parsed.bubbles
-      .filter((b: unknown): b is Record<string, unknown> => typeof b === 'object' && b !== null)
-      .map((b: Record<string, unknown>) => ({
-        kind: BUBBLE_KINDS.includes(b.kind as TurnBubbleKind) ? (b.kind as TurnBubbleKind) : 'change',
-        title: typeof b.title === 'string' && b.title.length > 0 ? b.title : null,
-        text: typeof b.text === 'string' ? b.text : ''
-      }))
-      .filter((b: TurnNarrativeBubble) => b.text.length > 0)
-
-    return {
-      summary: typeof parsed.summary === 'string' ? parsed.summary : '',
-      bubbles
-    }
-  } catch {
-    return fallback
   }
 }

@@ -1,9 +1,9 @@
 import { Radio } from 'lucide-react'
-import type { Session } from '@shared/types'
+import type { SessionWithPreview } from '@shared/types'
 import { formatTime } from '@shared/format'
 
 interface SessionListProps {
-  sessions: Session[]
+  sessions: SessionWithPreview[]
   selectedSessionId: string | null
   onSelect: (sessionId: string | null) => void
 }
@@ -13,7 +13,7 @@ interface SessionListProps {
 // 맨 위의 "실시간으로" 버튼으로 다시 라이브 추적으로 돌아갈 수 있다.
 export function SessionList({ sessions, selectedSessionId, onSelect }: SessionListProps) {
   if (sessions.length === 0) {
-    return <p className="px-3 text-[12px] text-[#5f7682]">아직 관찰된 세션이 없습니다.</p>
+    return <p className="px-3 text-[12px] text-[#6d7069]">아직 관찰된 세션이 없습니다.</p>
   }
 
   return (
@@ -22,7 +22,7 @@ export function SessionList({ sessions, selectedSessionId, onSelect }: SessionLi
         <button
           type="button"
           onClick={() => onSelect(null)}
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[#8fc9ae] hover:bg-[#152129]"
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[#3c7566] hover:bg-[#f1f0eb]"
         >
           <Radio size={13} /> 실시간으로 돌아가기
         </button>
@@ -36,31 +36,32 @@ export function SessionList({ sessions, selectedSessionId, onSelect }: SessionLi
             type="button"
             onClick={() => onSelect(session.id)}
             className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left transition ${
-              isSelected ? 'bg-[#14212a]' : 'hover:bg-[#121d25]'
+              isSelected ? 'bg-[#eaf4ef]' : 'hover:bg-[#f6f5f1]'
             }`}
           >
             <span
               className={`size-1.5 shrink-0 rounded-full ${
-                session.ended_at ? 'bg-[#3d5560]' : 'bg-[#79d8b4] shadow-[0_0_8px_rgba(121,216,180,.6)]'
+                session.ended_at ? 'bg-[#a9aaa4]' : 'bg-[#4f9c84] shadow-[0_0_8px_rgba(121,216,180,.6)]'
               }`}
             />
             <span className="min-w-0 flex-1">
               <span
-                className={`block truncate font-mono text-[11px] ${
-                  isSelected ? 'text-[#d7e3e9]' : 'text-[#8fa3ad]'
+                title={session.first_prompt_text ?? undefined}
+                className={`block truncate text-[12px] ${
+                  isSelected ? 'font-medium text-[#373832]' : 'text-[#6d7069]'
                 }`}
               >
-                {session.id.slice(0, 8)}
+                {session.first_prompt_text ?? '아직 요청이 없어요'}
               </span>
-              <span className="block font-mono text-[10px] text-[#5f7682]">
+              <span className="block font-mono text-[10px] text-[#9a9a92]">
                 {formatTime(session.started_at)}
               </span>
             </span>
             <span
               className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[9px] ${
                 session.ended_at
-                  ? 'bg-[#1b2831] text-[#7d93a0]'
-                  : 'bg-[#193c35] text-[#91dfbf]'
+                  ? 'bg-[#f1f0eb] text-[#6d7069]'
+                  : 'bg-[#e4f0eb] text-[#245248]'
               }`}
             >
               {session.ended_at ? '완료' : '진행 중'}

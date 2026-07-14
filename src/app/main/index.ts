@@ -16,8 +16,7 @@ import type {
   PipelineHandle,
   Project,
   Prompt,
-  QnaHistoryEntry,
-  Session,
+  SessionWithPreview,
   SkillLevel,
   ToolEvent
 } from '@shared/types'
@@ -38,6 +37,16 @@ const schemaPath = join(app.getAppPath(), 'db', 'schema.sql')
 
 const db = openDatabase(dbPath)
 applySchema(db, schemaPath)
+
+// 비정상 종료(강제 종료, 크래시, dev 서버 재시작 등)로 "완료"를 못 누르고 끝난 세션은
+// ended_at이 영원히 NULL로 남는다 — 이 프로세스가 막 시작된 지금 시점엔 아직 어떤
+// pipeline도 연 적이 없으므로, 이 시점에 ended_at이 NULL인 세션은 전부 이전 실행의
+// 잔재다. 그대로 두면 caption-worker/lecture-note-worker가 "다음 턴 시작 또는 세션
+// 종료" 조건을 영원히 못 만족해 마지막 턴 캡션과 강의노트가 영구히 안 생긴다 — 앱을
+// 새로 띄울 때마다 한 번 정리해 다음 턴 시작을 기다리지 않고 바로 완료 처리한다.
+db.prepare(
+  `UPDATE sessions SET ended_at = @ended_at WHERE ended_at IS NULL`
+).run({ ended_at: new Date().toISOString() })
 
 // SPEC 4.6 "파이프라인 이벤트 → IPC push": main이 DB를 갱신할 때마다 렌더러로
 // 'data-changed'를 push해 폴링 주기를 기다리지 않고 즉시 재조회하게 한다. 같은
@@ -94,6 +103,51 @@ const insertProjectStmt = db.prepare(`
   INSERT INTO projects (id, name, workspace_path, created_at)
   VALUES (@id, @name, @workspace_path, @created_at)
 `)
+
+// 프로젝트 삭제 시 함께 지워야 하는 관측 이력 — schema.sql의 FK(foreign_keys = ON,
+// db/connection.ts)를 지키려면 자식 행부터 순서대로 지워야 한다. ai_explanations는
+// target_id에 FK가 없어 안 지워도 에러는 안 나지만, 그대로 두면 프롬프트/버전이 사라진
+// 뒤에도 고아 해설 캐시로 남으므로 같이 정리한다.
+const deleteExplanationsByPromptStmt = db.prepare(`
+  DELETE FROM ai_explanations
+  WHERE target_type = 'prompt' AND target_id IN (
+    SELECT p.id FROM prompts p
+    JOIN sessions s ON s.id = p.session_id
+    WHERE s.project_id = @project_id
+  )
+`)
+const deleteExplanationsByVersionStmt = db.prepare(`
+  DELETE FROM ai_explanations
+  WHERE target_type = 'code_unit_version' AND target_id IN (
+    SELECT v.id FROM code_unit_versions v
+    JOIN code_units u ON u.id = v.unit_id
+    WHERE u.project_id = @project_id
+  )
+`)
+const deleteEdgesByProjectStmt = db.prepare(`
+  DELETE FROM code_unit_edges
+  WHERE from_unit_id IN (SELECT id FROM code_units WHERE project_id = @project_id)
+     OR to_unit_id IN (SELECT id FROM code_units WHERE project_id = @project_id)
+`)
+const deleteVersionsByProjectStmt = db.prepare(`
+  DELETE FROM code_unit_versions
+  WHERE unit_id IN (SELECT id FROM code_units WHERE project_id = @project_id)
+`)
+const deleteToolEventsByProjectStmt = db.prepare(`
+  DELETE FROM tool_events
+  WHERE session_id IN (SELECT id FROM sessions WHERE project_id = @project_id)
+`)
+const deletePromptsByProjectStmt = db.prepare(`
+  DELETE FROM prompts
+  WHERE session_id IN (SELECT id FROM sessions WHERE project_id = @project_id)
+`)
+const deleteLectureNotesByProjectStmt = db.prepare(`
+  DELETE FROM lecture_notes
+  WHERE session_id IN (SELECT id FROM sessions WHERE project_id = @project_id)
+`)
+const deleteSessionsByProjectStmt = db.prepare(`DELETE FROM sessions WHERE project_id = @project_id`)
+const deleteCodeUnitsByProjectStmt = db.prepare(`DELETE FROM code_units WHERE project_id = @project_id`)
+const deleteProjectStmt = db.prepare(`DELETE FROM projects WHERE id = @id`)
 
 function getOrCreateProject(name: string, workspacePath: string): Project {
   const existing = getProjectByPathStmt.get({ workspace_path: workspacePath }) as Project | undefined
@@ -167,6 +221,28 @@ async function completeMonitoring(): Promise<void> {
   // 종료 직전 Edit들의 AST diff가 DB에 기록될 때까지 기다린다 — 이걸 기다려야
   // 이어지는 강의노트 합성이 마지막 변경까지 포함한다.
   await stopping.stop()
+}
+
+// 지금 파이프라인이 관찰 중인 프로젝트는 지울 수 없다 — 지우고 나면 파이프라인이
+// 죽은 project_id로 계속 행을 쓰게 된다. 렌더러도 같은 조건으로 삭제 버튼을 막지만,
+// 여기서도 한 번 더 막아둔다(다른 창/경합 대비).
+function deleteProject(projectId: string): void {
+  if (monitoringProjectId === projectId) {
+    throw new Error('관찰 중인 프로젝트는 삭제할 수 없어요. 먼저 완료를 눌러주세요.')
+  }
+  const run = db.transaction((id: string): void => {
+    deleteExplanationsByPromptStmt.run({ project_id: id })
+    deleteExplanationsByVersionStmt.run({ project_id: id })
+    deleteEdgesByProjectStmt.run({ project_id: id })
+    deleteVersionsByProjectStmt.run({ project_id: id })
+    deleteToolEventsByProjectStmt.run({ project_id: id })
+    deletePromptsByProjectStmt.run({ project_id: id })
+    deleteLectureNotesByProjectStmt.run({ project_id: id })
+    deleteSessionsByProjectStmt.run({ project_id: id })
+    deleteCodeUnitsByProjectStmt.run({ project_id: id })
+    deleteProjectStmt.run({ id })
+  })
+  run(projectId)
 }
 
 if (process.env.FACTCODING_AUTOSTART_PIPELINE === '1') {
@@ -278,8 +354,18 @@ const getAllLectureNotes = db.prepare(`
   ORDER BY ln.created_at DESC
 `)
 
+// 사이드바 "지난 턴" 목록은 세션을 짧은 id(커밋 해시처럼 보임) 대신 그 세션의 첫 프롬프트
+// 내용으로 식별해서 보여준다 — 세션당 첫 turn_index의 user_text 하나를 상관 서브쿼리로 붙인다.
 const getAllSessions = db.prepare(`
-  SELECT * FROM sessions WHERE project_id = @project_id ORDER BY started_at DESC
+  SELECT s.*, (
+    SELECT p.user_text FROM prompts p
+    WHERE p.session_id = s.id
+    ORDER BY p.turn_index ASC
+    LIMIT 1
+  ) AS first_prompt_text
+  FROM sessions s
+  WHERE s.project_id = @project_id
+  ORDER BY s.started_at DESC
 `)
 
 const getOnboardingCompletedStmt = db.prepare(`
@@ -351,6 +437,10 @@ function registerIpcHandlers(): void {
     return result.filePaths[0]
   })
 
+  ipcMain.handle('project:delete', (_event, projectId: string): void => {
+    deleteProject(projectId)
+  })
+
   ipcMain.handle('db:getLatestSessionId', (_event, projectId: string): string | null => {
     const row = getLatestSessionId.get({ project_id: projectId }) as { id: string } | undefined
     return row?.id ?? null
@@ -373,8 +463,8 @@ function registerIpcHandlers(): void {
     }
   )
 
-  ipcMain.handle('db:getSessions', (_event, projectId: string): Session[] => {
-    return getAllSessions.all({ project_id: projectId }) as Session[]
+  ipcMain.handle('db:getSessions', (_event, projectId: string): SessionWithPreview[] => {
+    return getAllSessions.all({ project_id: projectId }) as SessionWithPreview[]
   })
 
   ipcMain.handle('db:getToolEvents', (_event, sessionId: string): ToolEvent[] => {
@@ -539,16 +629,10 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(
     'db:answerQuestion',
-    async (
-      _event,
-      sessionId: string,
-      question: string,
-      history: QnaHistoryEntry[],
-      skillLevel: SkillLevel
-    ): Promise<string> => {
+    async (_event, sessionId: string, question: string, skillLevel: SkillLevel): Promise<string> => {
       const context = loadContextBundle(sessionId)
       if (!context) return '세션 정보를 찾을 수 없습니다.'
-      return aiProvider.answerQuestion(question, context, history, skillLevel)
+      return aiProvider.answerQuestion(question, context, skillLevel)
     }
   )
 }
@@ -599,9 +683,11 @@ app.on('window-all-closed', () => {
   stopLectureNoteWorker()
   void (async () => {
     try {
-      // 파이프라인이 진행 중인 AST diff를 마저 기록하고 자기 DB 커넥션을 닫을 때까지
-      // 기다린다 — 기다리지 않고 quit하면 종료 직전 변경이 유실된다.
-      await pipeline?.stop()
+      // "완료" 버튼을 안 누르고 창을 그냥 닫아도(Cmd+Q 등) 지금 관찰 중이던 세션을
+      // ended_at 기록까지 마친 뒤 종료한다 — 안 그러면 이 세션의 마지막 턴이 다음 실행
+      // 시작 때 위 고아 세션 정리 로직에 걸릴 때까지 "완료" 신호를 못 받는다.
+      // completeMonitoring이 markSessionEnded + stop(AST diff flush 대기)을 함께 처리한다.
+      await completeMonitoring()
     } catch (err) {
       console.error('[pipeline] stop failed:', err)
     }

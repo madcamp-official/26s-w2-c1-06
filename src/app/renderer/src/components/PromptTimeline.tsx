@@ -1,0 +1,137 @@
+import { useState } from 'react'
+import { CheckCircle2, Circle, FolderKanban, Loader2, MoreHorizontal } from 'lucide-react'
+import type { AiExplanation } from '@shared/types'
+import { ORPHAN_TURN_ID, type TurnListItem } from './TurnList'
+
+interface PromptTimelineProps {
+  items: TurnListItem[]
+  explanations: Map<string, AiExplanation>
+  selectedTurnId: string | null
+  onSelectTurn: (turnId: string) => void
+}
+
+const MAX_VISIBLE = 10
+
+type Segment = { key: string; kind: 'ellipsis' } | { key: string; kind: 'item'; item: TurnListItem }
+
+// 활동 탭의 "지난 프롬프트" 선택기: 세로 목록 대신 프롬프트 하나하나를 타임라인 위
+// 노드로 늘어놓고(왼쪽=과거 → 오른쪽=최신) 클릭해서 고르게 한다. 세션이 길어져
+// 노드가 너무 많아지면 앞쪽(오래된) 것들을 "…" 노드 하나로 접어두고, 그 "…"를 클릭하면
+// 접어뒀던 프롬프트까지 전부 펼쳐서 같은 줄 위에서 고를 수 있게 한다.
+export function PromptTimeline({ items, explanations, selectedTurnId, onSelectTurn }: PromptTimelineProps) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (items.length === 0) {
+    // 빈 상태에서도 헤더("PROMPT TIMELINE")와 타임라인 선 자리는 그대로 남겨서, 아래
+    // TurnDetailPanel의 빈 메시지와 똑같이 생긴 텅 빈 박스로 보이지 않게 한다 — 이 자리가
+    // 곧 타임라인이 될 자리라는 걸 알 수 있어야 한다.
+    return (
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="mb-3">
+          <p className="text-[10px] font-semibold tracking-[.1em] text-muted-foreground">PROMPT TIMELINE</p>
+          <h4 className="mt-0.5 text-[13px] font-semibold text-muted-foreground">
+            아직 완료된 프롬프트가 없어요
+          </h4>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="grid size-7 shrink-0 place-items-center rounded-full border border-dashed border-[#cfcfc7] text-[#9a9a92]">
+            <Circle size={10} />
+          </span>
+          <span className="h-px flex-1 bg-border" />
+        </div>
+      </div>
+    )
+  }
+
+  const truncated = !expanded && items.length > MAX_VISIBLE
+  const visibleItems = truncated ? items.slice(items.length - MAX_VISIBLE) : items
+  const hiddenCount = items.length - visibleItems.length
+
+  const selectedItem = items.find((item) => item.turnId === selectedTurnId) ?? null
+  const selectedLabel = selectedItem
+    ? selectedItem.turnId === ORPHAN_TURN_ID
+      ? '수동으로 수정된 파일들'
+      : (selectedItem.userText ?? '연결된 요청 없음')
+    : '프롬프트를 선택하세요'
+
+  const segments: Segment[] = []
+  if (hiddenCount > 0) segments.push({ key: '__ellipsis__', kind: 'ellipsis' })
+  for (const item of visibleItems) segments.push({ key: item.turnId, kind: 'item', item })
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold tracking-[.1em] text-muted-foreground">PROMPT TIMELINE</p>
+          <h4 className="mt-0.5 truncate text-[13px] font-semibold">{selectedLabel}</h4>
+        </div>
+        <span className="shrink-0 text-[10px] text-muted-foreground">{items.length}개 프롬프트</span>
+      </div>
+
+      <div className="overflow-x-auto pb-1">
+        <div className="flex min-w-max items-center">
+          {segments.map((segment, index) => (
+            <div key={segment.key} className="flex shrink-0 items-center">
+              {index > 0 && <span className="h-px w-6 shrink-0 bg-border" />}
+              {segment.kind === 'ellipsis' ? (
+                <button
+                  type="button"
+                  onClick={() => setExpanded(true)}
+                  title={`이전 프롬프트 ${hiddenCount}개 더 보기`}
+                  className="grid size-7 shrink-0 place-items-center rounded-full border border-dashed border-[#cfcfc7] text-[#6d7069] transition hover:border-[#4f9c84] hover:text-[#285c52]"
+                >
+                  <MoreHorizontal size={14} />
+                </button>
+              ) : (
+                <TimelineNode
+                  item={segment.item}
+                  active={segment.item.turnId === selectedTurnId}
+                  explanation={
+                    segment.item.turnId === ORPHAN_TURN_ID ? undefined : explanations.get(segment.item.turnId)
+                  }
+                  onSelect={() => onSelectTurn(segment.item.turnId)}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TimelineNode({
+  item,
+  active,
+  explanation,
+  onSelect
+}: {
+  item: TurnListItem
+  active: boolean
+  explanation: AiExplanation | undefined
+  onSelect: () => void
+}) {
+  const isOrphan = item.turnId === ORPHAN_TURN_ID
+  const inProgress = item.isLastTurn && !explanation && !isOrphan
+  const Icon = isOrphan ? FolderKanban : inProgress ? Loader2 : CheckCircle2
+  const label = isOrphan
+    ? '수동으로 수정된 파일들'
+    : `${item.turnIndex !== null ? `프롬프트 ${item.turnIndex + 1}: ` : ''}${item.userText ?? '연결된 요청 없음'}`
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      className={`grid size-7 shrink-0 place-items-center rounded-full border-2 transition ${
+        active
+          ? 'border-[#285c52] bg-[#e4f0eb] text-[#245248]'
+          : 'border-transparent bg-[#eef5f2] text-[#3c7c6d] hover:border-[#b8d9ce]'
+      }`}
+    >
+      <Icon size={13} className={inProgress ? 'animate-spin' : undefined} />
+    </button>
+  )
+}

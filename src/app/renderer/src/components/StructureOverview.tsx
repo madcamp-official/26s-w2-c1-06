@@ -8,14 +8,9 @@ interface StructureOverviewProps {
   edges: CodeUnitEdge[]
   selectedUnitId: string | null
   onSelectUnit: (unitId: string) => void
-  /** 구조도 탭(전체 화면)과 턴 상세(미니 그래프)가 서로 다른 높이를 쓴다. */
+  /** 구조도 탭(전체 화면)과 프롬프트 상세(미니 그래프)가 서로 다른 높이를 쓴다. */
   heightClassName?: string
   emptyMessage?: string
-  /**
-   * 턴 상세에서 "전체 구조도 위에 이번 턴이 만진 곳"을 강사가 짚어주듯 표시할 때 사용.
-   * 지정하면 이 집합에 든 유닛만 강조되고 나머지 노드·엣지는 흐려진다.
-   */
-  highlightUnitIds?: Set<string> | null
 }
 
 const UNIT_TYPE_COLOR: Record<UnitType, string> = {
@@ -25,35 +20,30 @@ const UNIT_TYPE_COLOR: Record<UnitType, string> = {
   class: '#4ec9b0'
 }
 
-const LAYER_WIDTH = 200
-const ROW_HEIGHT = 70
+const COLUMN_WIDTH = 220
+const LAYER_HEIGHT = 90
 
 // SPEC 4.5 구조도 오버뷰: code_units를 노드, code_unit_edges를 엣지로 렌더.
 // 노드 클릭 시 유닛 타임라인으로 drill-down (Level 1 → Level 3, SPEC 5장).
-// 별도 레이아웃 라이브러리 없이, 엣지 방향 기준 BFS로 왼쪽→오른쪽 레이어를 계산한다.
+// 별도 레이아웃 라이브러리 없이, 엣지 방향 기준 BFS로 위→아래 레이어를 계산하고,
+// 같은 레이어(의존 관계가 없는 형제 유닛들)는 옆으로 나란히 늘어놓는다 — 패널이
+// 세로로 길고 좁기보다 가로로 넓은 경우가 많아, 같은 레이어 노드가 아래로 쌓이는
+// 대신 옆으로 펼쳐져야 "한눈에" 보기 편하다.
 export function StructureOverview({
   units,
   edges,
   selectedUnitId,
   onSelectUnit,
   heightClassName = 'h-[420px] lg:h-[calc(100vh-260px)]',
-  emptyMessage = '추적된 코드 유닛이 없습니다.',
-  highlightUnitIds = null
+  emptyMessage = '추적된 코드 유닛이 없습니다.'
 }: StructureOverviewProps) {
   const { nodes, flowEdges } = useMemo(() => {
     const positions = computeLayeredPositions(units, edges)
 
+    // border 축약형 + borderLeft를 섞으면 React가 리렌더마다 스타일 충돌 경고를 낸다
+    // — 변마다 개별 속성으로 지정한다.
     const nodes: Node[] = units.map((unit) => {
-      const highlighted = highlightUnitIds?.has(unit.id) ?? false
-      const dimmed = highlightUnitIds != null && highlightUnitIds.size > 0 && !highlighted
-      // border 축약형 + borderLeft를 섞으면 React가 리렌더마다 스타일 충돌 경고를 낸다
-      // — 변마다 개별 속성으로 지정한다.
-      const edgeBorder =
-        unit.id === selectedUnitId
-          ? '2px solid #7fd9b5'
-          : highlighted
-            ? '2px solid #8ed7ba'
-            : '1px solid #2c4250'
+      const edgeBorder = unit.id === selectedUnitId ? '2px solid #4f9c84' : '1px solid #dfe3dc'
       return {
         id: unit.id,
         position: positions[unit.id] ?? { x: 0, y: 0 },
@@ -62,31 +52,21 @@ export function StructureOverview({
           borderTop: edgeBorder,
           borderRight: edgeBorder,
           borderBottom: edgeBorder,
-          borderLeft: `4px solid ${UNIT_TYPE_COLOR[unit.unit_type] ?? '#888888'}`,
+          borderLeft: `4px solid ${UNIT_TYPE_COLOR[unit.unit_type] ?? '#9a9a92'}`,
           borderRadius: 8,
           padding: '6px 10px',
           fontSize: 12,
           fontFamily: "'JetBrains Mono', monospace",
-          background: highlighted ? '#173229' : '#121d25',
-          color: highlighted ? '#d9f5e6' : '#c3d2da',
-          boxShadow: highlighted ? '0 0 18px rgba(142,215,186,.28)' : undefined,
-          opacity: dimmed ? 0.35 : 1,
+          background: '#ffffff',
+          color: '#373832',
           whiteSpace: 'pre-line',
           cursor: 'pointer'
         }
       }
     })
 
-    // 강조 모드에서는 강조 노드에 닿은 엣지만 또렷하게, 나머지는 함께 흐린다.
-    const flowEdges = mergeParallelEdges(edges).map((edge) => {
-      if (highlightUnitIds == null || highlightUnitIds.size === 0) return edge
-      const touchesHighlight =
-        highlightUnitIds.has(edge.source) || highlightUnitIds.has(edge.target)
-      return touchesHighlight ? edge : { ...edge, style: { opacity: 0.25 }, labelStyle: { opacity: 0.25 } }
-    })
-
-    return { nodes, flowEdges }
-  }, [units, edges, selectedUnitId, highlightUnitIds])
+    return { nodes, flowEdges: mergeParallelEdges(edges) }
+  }, [units, edges, selectedUnitId])
 
   if (units.length === 0) {
     return <p className="px-5 py-10 text-center text-[13px] text-muted-foreground">{emptyMessage}</p>
@@ -99,7 +79,7 @@ export function StructureOverview({
         edges={flowEdges}
         onNodeClick={(_event, node) => onSelectUnit(node.id)}
         fitView
-        colorMode="system"
+        colorMode="light"
         proOptions={{ hideAttribution: true }}
       >
         <Background />
@@ -164,14 +144,14 @@ function computeLayeredPositions(
     if (!layer.has(unit.id)) layer.set(unit.id, 0) // 순환/고아 노드는 레이어 0으로 대체
   })
 
-  const rowsUsedPerLayer = new Map<number, number>()
+  const columnsUsedPerLayer = new Map<number, number>()
   const positions: Record<string, { x: number; y: number }> = {}
 
   for (const unit of units) {
     const unitLayer = layer.get(unit.id) ?? 0
-    const row = rowsUsedPerLayer.get(unitLayer) ?? 0
-    rowsUsedPerLayer.set(unitLayer, row + 1)
-    positions[unit.id] = { x: unitLayer * LAYER_WIDTH, y: row * ROW_HEIGHT }
+    const column = columnsUsedPerLayer.get(unitLayer) ?? 0
+    columnsUsedPerLayer.set(unitLayer, column + 1)
+    positions[unit.id] = { x: column * COLUMN_WIDTH, y: unitLayer * LAYER_HEIGHT }
   }
 
   return positions
