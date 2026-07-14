@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import type { AIProvider } from '@ai/types'
 import type { CodeUnitVersionWithUnit, Prompt, SkillLevel, ToolEvent } from '@shared/types'
+import { STEP_IDLE_GAP_MS } from '@shared/steps'
 
 const BATCH_SIZE = 5
 // 같은 턴 요약이 계속 실패하면(429 쿼터 소진, 프롬프트 초과 등) 틱마다 같은 턴만
@@ -37,8 +38,14 @@ export function startCaptionWorker(
   `)
 
   // "완료된" 턴만 후보로 삼는다: 같은 세션에 다음 턴이 이미 시작됐거나(=이 턴은 끝났다는
-  // 뜻) 세션 자체가 종료됐을 때. 아직 에이전트가 도구를 계속 호출 중인, 진행 중인
-  // 마지막 턴은 제외해서 미완성 상태로 요약되지 않게 한다.
+  // 뜻), 세션 자체가 종료됐거나, 또는 이 턴의 마지막 활동으로부터 STEP_IDLE_GAP_MS가
+  // 지났을 때. 세 번째 조건이 필요한 이유: 사용자가 다음 프롬프트를 아직 안 쳤고
+  // 세션도(Factcoding의 "완료" 버튼을 안 눌러서) 안 끝난 채로 "그냥 작업이 끝나 있는"
+  // 상태가 실제로 흔하다 — 그동안은 앞의 두 조건만 봐서 이런 턴이 영원히 "완료" 판정을
+  // 못 받고 진행 중으로 멈춰 보였다. 스텝 경계에 이미 쓰는 것과 같은 유휴시간 기준을
+  // 재사용해 일관성을 맞춘다. 이 턴에 나중에(90초 넘게 쉬었다가) 이벤트가 더 붙으면
+  // 이미 저장된 캡션은 갱신되지 않는데 — 드문 경우이고, 없어서 영원히 안 끝나는
+  // 문제보다는 낫다고 판단했다.
   // 세션을 최신 세션 하나로 한정하지 않는다 — 과거 세션을 고정해 보거나 난이도를 바꾼
   // 경우에도 그 세션의 턴 해설이 채워져야 한다(버전 요약이 이미 전역 대상인 것과 동일).
   // 최신 세션부터 처리해 라이브 화면이 항상 먼저 채워진다.
@@ -59,6 +66,10 @@ export function startCaptionWorker(
       AND (
         EXISTS (SELECT 1 FROM prompts nxt WHERE nxt.session_id = p.session_id AND nxt.turn_index > p.turn_index)
         OR s.ended_at IS NOT NULL
+        OR COALESCE(
+             (SELECT MAX(te.created_at) FROM tool_events te WHERE te.prompt_id = p.id),
+             p.created_at
+           ) <= @idle_cutoff
       )
     ORDER BY s.started_at DESC, p.turn_index ASC
     LIMIT 1
@@ -129,7 +140,10 @@ export function startCaptionWorker(
       const skillLevel = ((getSkillLevel.get() as { value: string } | undefined)?.value ??
         'intermediate') as SkillLevel
 
-      let completedTurn = getNextCompletedTurn.get({ skill_level: skillLevel }) as Prompt | undefined
+      const idleCutoff = new Date(Date.now() - STEP_IDLE_GAP_MS).toISOString()
+      let completedTurn = getNextCompletedTurn.get({ skill_level: skillLevel, idle_cutoff: idleCutoff }) as
+        | Prompt
+        | undefined
       if (completedTurn && (retryAfterByTurn.get(completedTurn.id) ?? 0) > Date.now()) {
         completedTurn = undefined // 쿨다운 중 — 이번 틱은 버전 요약이라도 처리한다
       }

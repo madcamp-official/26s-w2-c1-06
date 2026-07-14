@@ -186,24 +186,3 @@
   border-left: 3px solid #b8d9ce;
   color: #5c7a6d;
 }
-
-/* "현재 프롬프트" 카드의 진행바 — 실제 % 진행률을 알 방법이 없는 오픈엔디드 에이전트
-   작업이라, 고정폭(55%)으로 멈춰 있는 대신 계속 움직이는 불확정(indeterminate) 바로
-   "아직 진행 중"임을 보여준다. 완료되면(currentTurnExplained) 폭 100%로 고정된다. */
-@keyframes progress-indeterminate {
-  0% {
-    left: -35%;
-  }
-  100% {
-    left: 100%;
-  }
-}
-.progress-bar--indeterminate {
-  position: absolute;
-  top: 0;
-  height: 100%;
-  width: 35%;
-  border-radius: 999px;
-  background: #285c52;
-  animation: progress-indeterminate 1.4s ease-in-out infinite;
-}

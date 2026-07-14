@@ -170,6 +170,22 @@ function App() {
   const currentTurn = prompts.length > 0 ? prompts[prompts.length - 1] : null
   const currentTurnExplained = currentTurn ? explanations.has(currentTurn.id) : false
 
+  // "현재 프롬프트" 진행바 — 에이전트 작업은 오픈엔디드라 "전체 대비 몇 %"를 미리 알
+  // 방법이 없다. 대신 이 턴에서 지금까지 구조적으로 닫힌(더 이상 이벤트가 안 붙는)
+  // 스텝 개수를 고정 사이클로 정규화해서 보여준다 — steps는 이미 promptId/inProgress를
+  // 들고 있어(useSteps) 이 턴 것만 걸러 쓰면 된다. 완벽한 예측은 아니지만 스텝이 실제로
+  // 끝날 때마다 진짜로 전진하는 신호라, 고정 55%에 멈춰 있던 예전 방식보다는 정직하다.
+  // 95%로 캡을 두는 이유: 스텝이 목표치를 넘었다고 바를 100%로 채우면 상태 텍스트는
+  // 아직 "실행 중"인데 바는 "완료"로 보이는 모순이 생긴다 — 실제 완료(currentTurnExplained)
+  // 시점에만 100%로 스냅한다.
+  const TURN_PROGRESS_STEP_TARGET = 8
+  const currentTurnStepCount = currentTurn
+    ? steps.filter((s) => s.promptId === currentTurn.id && !s.inProgress).length
+    : 0
+  const currentTurnProgressPercent = currentTurnExplained
+    ? 100
+    : Math.min(95, Math.round((currentTurnStepCount / TURN_PROGRESS_STEP_TARGET) * 100))
+
   const turnItems = useMemo(() => buildTurnList(prompts, events), [prompts, events])
   const defaultTurnId = useMemo(() => {
     const realTurns = turnItems.filter((t) => t.turnIndex !== null)
@@ -395,6 +411,8 @@ function App() {
                 loading={loading}
                 currentTurn={currentTurn}
                 currentTurnExplained={currentTurnExplained}
+                currentTurnStepCount={currentTurnStepCount}
+                currentTurnProgressPercent={currentTurnProgressPercent}
                 effectiveTurnId={effectiveTurnId}
                 turnItems={turnItems}
                 selectedTurnItem={selectedTurnItem}
@@ -438,6 +456,8 @@ interface ProjectPageProps {
   loading: boolean
   currentTurn: ReturnType<typeof useSessionTrace>['prompts'][number] | null
   currentTurnExplained: boolean
+  currentTurnStepCount: number
+  currentTurnProgressPercent: number
   effectiveTurnId: string | null
   turnItems: ReturnType<typeof buildTurnList>
   selectedTurnItem: ReturnType<typeof buildTurnList>[number] | null
@@ -475,6 +495,8 @@ function ProjectPage({
   loading,
   currentTurn,
   currentTurnExplained,
+  currentTurnStepCount,
+  currentTurnProgressPercent,
   effectiveTurnId,
   turnItems,
   selectedTurnItem,
@@ -622,17 +644,19 @@ function ProjectPage({
                     ? stripSystemContextTags(currentTurn?.user_text ?? null) || '에이전트의 첫 작업을 기다리고 있어요'
                     : '트래킹을 켜면 실행 상태를 볼 수 있어요'}
                 </p>
-                <div className="relative mt-3 h-1.5 overflow-hidden rounded-full bg-[#efeee9]">
-                  {monitoring.isMonitoring && currentTurnExplained && (
-                    <div className="h-full w-full rounded-full bg-[#285c52] transition-all duration-700" />
-                  )}
-                  {monitoring.isMonitoring && !currentTurnExplained && (
-                    <div className="progress-bar--indeterminate" />
-                  )}
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#efeee9]">
+                  <div
+                    className="h-full rounded-full bg-[#285c52] transition-all duration-700"
+                    style={{ width: monitoring.isMonitoring ? `${currentTurnProgressPercent}%` : '0%' }}
+                  />
                 </div>
                 <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
                   <span>
-                    {monitoring.isMonitoring ? (currentTurnExplained ? '요약 완료' : '실행 중') : '업데이트 없음'}
+                    {monitoring.isMonitoring
+                      ? currentTurnExplained
+                        ? '요약 완료'
+                        : `스텝 ${currentTurnStepCount}개 진행됨`
+                      : '업데이트 없음'}
                   </span>
                   <span>{monitoring.isMonitoring ? `프롬프트 ${prompts.length}개 관찰됨` : '트래킹을 켜세요'}</span>
                 </div>
