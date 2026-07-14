@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronRight, FolderKanban } from 'lucide-react'
+import { CheckCircle2, ChevronRight } from 'lucide-react'
 import type {
   AiExplanation,
   CodeUnit,
@@ -9,7 +9,7 @@ import type {
   ToolEvent
 } from '@shared/types'
 import { formatRelativeTime } from '@shared/format'
-import { buildTurnList, ORPHAN_TURN_ID } from './TurnList'
+import { buildTurnList } from './TurnList'
 import { TurnDetailPanel } from './TurnDetailPanel'
 
 interface RecentTurnsProps {
@@ -58,18 +58,13 @@ export function RecentTurns({
   unitVersionExplanations,
   onViewAll
 }: RecentTurnsProps) {
-  // 완료(요약 존재)된 턴 또는 수동 수정 묶음만 남긴다 — 아직 요약이 없는 진행 중인
-  // 턴은 완료되어 캡션이 생길 때까지 목록에서 빠진다.
-  const items = [...buildTurnList(prompts, events)]
-    .reverse()
-    .filter((item) => item.turnId === ORPHAN_TURN_ID || explanations.has(item.turnId))
+  // 완료(요약 존재)된 프롬프트 턴만 남긴다 — 아직 요약이 없는 진행 중인 턴은 완료되어
+  // 캡션이 생길 때까지 목록에서 빠진다. 프롬프트 실행 없이 수동으로 바뀐 파일 묶음
+  // (ORPHAN_TURN_ID)은 explanations에 절대 안 채워지므로 이 필터만으로 자연히 제외된다
+  // — "실행"이 아니라서(구현된 기능 요약이 없음) 이 목록에는 애초에 안 어울린다.
+  const items = [...buildTurnList(prompts, events)].reverse().filter((item) => explanations.has(item.turnId))
 
   const promptTimeById = new Map(prompts.map((p) => [p.id, p.created_at]))
-  const latestEventTime = events.reduce<string | null>((latest, event) => {
-    if (!event.created_at) return latest
-    if (!latest || event.created_at > latest) return event.created_at
-    return latest
-  }, null)
 
   return (
     <section>
@@ -98,16 +93,11 @@ export function RecentTurns({
           </p>
         ) : (
           items.map((item) => {
-            const isOrphan = item.turnId === ORPHAN_TURN_ID
-            const explanation = isOrphan ? undefined : explanations.get(item.turnId)
+            const explanation = explanations.get(item.turnId)
             const expanded = expandedTurnId === item.turnId
-            const time = formatRelativeTime(isOrphan ? latestEventTime : (promptTimeById.get(item.turnId) ?? null))
-
-            const Icon = isOrphan ? FolderKanban : CheckCircle2
-            const title = isOrphan ? '수동으로 수정된 파일들' : (item.userText ?? '연결된 요청 없음')
-            const desc = isOrphan
-              ? `프롬프트 실행 없이 직접 바뀐 파일 ${item.eventCount}개예요.`
-              : (explanation?.content ?? '요약 생성 중…')
+            const time = formatRelativeTime(promptTimeById.get(item.turnId) ?? null)
+            const title = item.userText ?? '연결된 요청 없음'
+            const desc = explanation?.content ?? '요약 생성 중…'
 
             return (
               <div key={item.turnId}>
@@ -121,7 +111,7 @@ export function RecentTurns({
                       expanded ? 'bg-[#e4f0eb] text-[#245248]' : 'bg-[#eef5f2] text-[#3c7c6d]'
                     }`}
                   >
-                    <Icon size={16} />
+                    <CheckCircle2 size={16} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-3">
@@ -140,7 +130,7 @@ export function RecentTurns({
                   />
                 </button>
 
-                {expanded && !isOrphan && (
+                {expanded && (
                   <div className="pb-5">
                     <TurnDetailPanel
                       turn={item}

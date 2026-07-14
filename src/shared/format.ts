@@ -27,6 +27,22 @@ export function formatRelativeTime(iso: string | null): string {
   return new Date(iso).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })
 }
 
+// Claude Code가 사용자 메시지 앞뒤에 자동으로 끼워 넣는 컨텍스트 태그들(지금 연
+// IDE 파일, 선택 영역, 시스템 리마인더 등) — user_text에 그대로 저장되므로, 프롬프트
+// 제목/카드로 보여줄 땐 사람이 실제로 타이핑한 부분만 남기고 걷어낸다. AI 캡션 생성
+// (caption-worker)엔 원본 그대로 넘어가야 하므로 여기서 걷어내는 건 화면 표시용일 뿐,
+// DB에 저장된 원본 텍스트 자체는 건드리지 않는다.
+const SYSTEM_CONTEXT_TAG_NAMES = ['ide_opened_file', 'ide_selection', 'ide_diagnostics', 'system-reminder']
+const SYSTEM_CONTEXT_TAG_PATTERN = new RegExp(
+  `<(${SYSTEM_CONTEXT_TAG_NAMES.join('|')})>[\\s\\S]*?<\\/\\1>`,
+  'g'
+)
+
+export function stripSystemContextTags(text: string | null): string {
+  if (!text) return ''
+  return text.replace(SYSTEM_CONTEXT_TAG_PATTERN, '').trim()
+}
+
 export function parseConceptTags(json: string | null): string[] {
   if (!json) return []
   try {

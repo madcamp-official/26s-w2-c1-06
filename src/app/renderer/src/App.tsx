@@ -33,7 +33,7 @@ import { useSteps } from './hooks/useSteps'
 import { useTurnDetail } from './hooks/useTurnDetail'
 import { useUnitTimeline } from './hooks/useUnitTimeline'
 import type { Project } from '@shared/types'
-import { formatRelativeTime } from '@shared/format'
+import { formatRelativeTime, stripSystemContextTags } from '@shared/format'
 import { SKILL_LEVEL_LABEL } from '@shared/skillProfile'
 
 type ViewKey = 'projects' | 'project'
@@ -619,14 +619,16 @@ function ProjectPage({
                 </div>
                 <p className="mt-2 truncate text-[12px] font-medium text-[#3f514c]">
                   {monitoring.isMonitoring
-                    ? (currentTurn?.user_text ?? '에이전트의 첫 작업을 기다리고 있어요')
+                    ? stripSystemContextTags(currentTurn?.user_text ?? null) || '에이전트의 첫 작업을 기다리고 있어요'
                     : '트래킹을 켜면 실행 상태를 볼 수 있어요'}
                 </p>
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#efeee9]">
-                  <div
-                    className="h-full rounded-full bg-[#285c52] transition-all duration-700"
-                    style={{ width: monitoring.isMonitoring ? (currentTurnExplained ? '100%' : '55%') : '0%' }}
-                  />
+                <div className="relative mt-3 h-1.5 overflow-hidden rounded-full bg-[#efeee9]">
+                  {monitoring.isMonitoring && currentTurnExplained && (
+                    <div className="h-full w-full rounded-full bg-[#285c52] transition-all duration-700" />
+                  )}
+                  {monitoring.isMonitoring && !currentTurnExplained && (
+                    <div className="progress-bar--indeterminate" />
+                  )}
                 </div>
                 <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
                   <span>
@@ -711,7 +713,7 @@ function ProjectPage({
               )}
             </div>
             <h2 className="max-w-[900px] text-[22px] font-semibold leading-tight tracking-[-0.03em] sm:text-[25px]">
-              {currentTurn?.user_text ??
+              {stripSystemContextTags(currentTurn?.user_text ?? null) ||
                 (monitoring.isMonitoring
                   ? '에이전트의 첫 작업을 기다리고 있어요'
                   : '헤더 옆 "시작하기"를 누르면 관찰이 시작돼요')}

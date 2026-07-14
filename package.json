@@ -15,6 +15,7 @@
     "db:init": "tsx db/init.ts",
     "db:seed": "tsx db/seed.ts",
     "test:keypool": "tsx scripts/test-keypool.ts",
+    "test:turn-list": "tsx scripts/test-turn-list.ts",
     "pipeline": "tsx src/pipeline/cli.ts"
   },
   "dependencies": {

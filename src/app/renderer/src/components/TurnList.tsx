@@ -1,4 +1,5 @@
 import type { Prompt, ToolEvent } from '@shared/types'
+import { stripSystemContextTags } from '@shared/format'
 
 // 프롬프트에 연결되지 않은 이벤트(수동 수정 등, SPEC 4.1 fallback)를 가리키는 고정 키 —
 // 실제 prompt.id(UUID)와 충돌하지 않는다.
@@ -31,17 +32,24 @@ export function buildTurnList(prompts: Prompt[], events: ToolEvent[]): TurnListI
     }
   }
 
-  const lastPromptId = prompts.length > 0 ? prompts[prompts.length - 1].id : null
+  // tool_event가 없는 턴(순수 대화, 또는 도구 호출 전에 중단된 요청 등)은 목록에서
+  // 아예 빠지므로, "마지막 턴"도 그 필터링 이후 기준으로 잡아야 한다. 원래 코드는
+  // 필터링 전 prompts 배열에서 lastPromptId를 골랐는데, 정작 그 마지막 프롬프트가
+  // tool_event 0개라 필터에 걸러지면 items 안 어떤 항목도 lastPromptId와 안 맞아
+  // isLastTurn이 전부 false가 된다 — 그러면 실제로 아직 캡션이 안 붙은, 진짜
+  // "진행 중"인 마지막 코딩 턴도 진행중 스피너 대신 완료 아이콘으로 잘못 표시된다.
+  const codeTurns = prompts.filter((p) => (countByPrompt.get(p.id) ?? 0) > 0)
+  const lastPromptId = codeTurns.length > 0 ? codeTurns[codeTurns.length - 1].id : null
 
-  const items: TurnListItem[] = prompts
-    .filter((p) => (countByPrompt.get(p.id) ?? 0) > 0)
-    .map((p) => ({
-      turnId: p.id,
-      turnIndex: p.turn_index,
-      userText: p.user_text,
-      eventCount: countByPrompt.get(p.id) ?? 0,
-      isLastTurn: p.id === lastPromptId
-    }))
+  const items: TurnListItem[] = codeTurns.map((p) => ({
+    turnId: p.id,
+    turnIndex: p.turn_index,
+    // 원본 user_text는 <ide_opened_file> 등 자동 삽입 컨텍스트 태그를 그대로 담고
+    // 있어서(캡션 생성 시엔 필요) 화면 제목으로 쓸 땐 사람이 실제로 쓴 부분만 남긴다.
+    userText: stripSystemContextTags(p.user_text) || null,
+    eventCount: countByPrompt.get(p.id) ?? 0,
+    isLastTurn: p.id === lastPromptId
+  }))
 
   if (orphanCount > 0) {
     items.push({

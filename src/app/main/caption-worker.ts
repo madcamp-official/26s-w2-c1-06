@@ -38,16 +38,21 @@ export function startCaptionWorker(
 
   // "완료된" 턴만 후보로 삼는다: 같은 세션에 다음 턴이 이미 시작됐거나(=이 턴은 끝났다는
   // 뜻) 세션 자체가 종료됐을 때. 아직 에이전트가 도구를 계속 호출 중인, 진행 중인
-  // 마지막 턴은 제외해서 미완성 상태로 요약되지 않게 한다. tool_event가 하나도 없는
-  // 턴(순수 대화 등)도 스킵 — "코딩 수정"이 없으면 요약할 feature가 없다.
+  // 마지막 턴은 제외해서 미완성 상태로 요약되지 않게 한다.
   // 세션을 최신 세션 하나로 한정하지 않는다 — 과거 세션을 고정해 보거나 난이도를 바꾼
   // 경우에도 그 세션의 턴 해설이 채워져야 한다(버전 요약이 이미 전역 대상인 것과 동일).
   // 최신 세션부터 처리해 라이브 화면이 항상 먼저 채워진다.
+  // 예전엔 tool_event가 하나도 없는 턴(순수 대화, 또는 도구 호출 전에 중단된 요청)을
+  // 여기서 걸러냈는데("코딩 수정이 없으면 요약할 feature가 없다"), 그러면 그 턴이
+  // 세션의 마지막 턴일 때 영원히 캡션이 안 생겨 "현재 프롬프트"/타임라인이 완료 판정을
+  // 못 받고 계속 진행 중으로 표시되는 문제가 있었다. explainTurn은 이벤트가 0개면
+  // AI 호출 없이 빈 caption을 즉시 돌려주므로(GeminiProvider 참조), 여기서 걸러낼
+  // 필요가 없다 — 화면 쪽(buildTurnList)이 이미 tool_event 없는 턴을 목록에서 빼므로
+  // 빈 캡션이 있어도 사용자에게 그대로 노출되진 않는다.
   const getNextCompletedTurn = db.prepare(`
     SELECT p.* FROM prompts p
     JOIN sessions s ON s.id = p.session_id
-    WHERE EXISTS (SELECT 1 FROM tool_events te WHERE te.prompt_id = p.id)
-      AND NOT EXISTS (
+    WHERE NOT EXISTS (
         SELECT 1 FROM ai_explanations ae
         WHERE ae.target_type = 'prompt' AND ae.target_id = p.id AND ae.skill_level = @skill_level
       )
