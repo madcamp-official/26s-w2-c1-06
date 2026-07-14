@@ -22,6 +22,31 @@ export interface VersionCaption {
   conceptTags: string[]
 }
 
+// 실시간 진행 로그(활동 탭 "바뀐 구조와 변경사항") 전용: 스텝(유휴시간/개수로 나뉜
+// 이벤트 묶음) 단위 요약. codeCandidate는 step-worker가 이미 결정론적으로 뽑아둔
+// 대표 diff — AI는 이걸 보고 설명만 채우지, 코드 자체를 새로 만들어내지 않는다.
+export interface StepInput {
+  stepId: string
+  noteText: string | null
+  events: ToolEvent[]
+  codeCandidate: { filePath: string; lang: string; snippet: string; otherFiles: string[] } | null
+}
+
+// AIProvider.summarizeSteps가 실제로 채우는 부분 — 이미 주어진 codeCandidate에 대한
+// 설명 3필드만. filePath/lang/snippet/otherFiles는 여기 없다(AI 책임 아님).
+export interface StepKeyCodeExplanation {
+  explanation: string
+  importance: string
+  application: string
+  conceptTags: string[]
+}
+
+export interface StepSummary {
+  stepId: string
+  summary: string
+  keyCode: StepKeyCodeExplanation | null
+}
+
 // SPEC 4.3.2 강의노트 합성 입력: 세션 전체를 한 번에 컨텍스트로 투입.
 export interface SessionTrace {
   session: Session
@@ -45,6 +70,10 @@ export interface AIProvider {
   // (caption-worker.ts의 완료 판정 참조) — Read/Write/Bash 등 개별 tool_event 단위가
   // 아니라 턴 전체를 하나의 feature로 요약해 관제실에 보여준다.
   explainTurn(prompt: Prompt, events: ToolEvent[], skillLevel: SkillLevel): Promise<TurnCaption>
+  // 활동 탭의 실시간 진행 로그(SPEC 확장: "실시간 코드 변천사 모니터링") 전용 — 턴이
+  // 끝나기 전에도(진행 중에도) 스텝 단위로 호출된다. explainTurn과 달리 턴 완료를
+  // 기다리지 않는다(step-worker.ts 참조).
+  summarizeSteps(steps: StepInput[], skillLevel: SkillLevel): Promise<StepSummary[]>
   explainUnitVersions(
     versions: CodeUnitVersionWithUnit[],
     skillLevel: SkillLevel

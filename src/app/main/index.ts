@@ -7,6 +7,7 @@ import { applySchema, openDatabase } from '@db/connection'
 import { createAIProvider } from '@ai/createAIProvider'
 import type {
   AiExplanation,
+  AssistantNote,
   CodeUnit,
   CodeUnitEdge,
   CodeUnitVersionWithUnit,
@@ -18,11 +19,15 @@ import type {
   Prompt,
   SessionWithPreview,
   SkillLevel,
+  StepWithExplanation,
   ToolEvent
 } from '@shared/types'
+import { groupIntoSteps } from '@shared/steps'
+import type { LiveStatus } from '@shared/stepProgress'
 import { startPipeline } from '@pipeline/index'
 import { startCaptionWorker } from './caption-worker'
 import { startLectureNoteWorker } from './lecture-note-worker'
+import { startStepWorker } from './step-worker'
 import { createContextBundleLoader, createSessionTraceLoader } from './session-trace'
 
 loadEnv({ path: join(app.getAppPath(), '.env'), quiet: true })
@@ -69,6 +74,13 @@ function broadcastDataChanged(kind: DataChangeKind): void {
 const aiProvider = createAIProvider()
 const stopCaptionWorker = startCaptionWorker(db, aiProvider, () => broadcastDataChanged('explanation'))
 const stopLectureNoteWorker = startLectureNoteWorker(db, aiProvider, () => broadcastDataChanged('lecture-note'))
+// 실시간 진행 로그(활동 탭 "바뀐 구조와 변경사항") — 턴 완료를 기다리는 caption-worker와
+// 달리 스텝(유휴시간/개수 단위) 하나가 끝날 때마다 즉시 요약한다. 스텝 요약도
+// ai_explanations 행이라 같은 'explanation' kind로 push하면 기존 훅이 그대로 재조회한다.
+const stepWorker = startStepWorker(db, aiProvider, {
+  onExplanationSaved: () => broadcastDataChanged('explanation'),
+  onLiveUpdate: (status) => mainWindow?.webContents.send('step-live-status', status)
+})
 const loadSessionTrace = createSessionTraceLoader(db)
 const loadContextBundle = createContextBundleLoader(db)
 
@@ -124,6 +136,14 @@ const deleteExplanationsByVersionStmt = db.prepare(`
     WHERE u.project_id = @project_id
   )
 `)
+// 실시간 진행 로그(step-worker.ts)의 step 행 target_id는 그 스텝 첫 tool_event의 id다.
+const deleteExplanationsByStepStmt = db.prepare(`
+  DELETE FROM ai_explanations
+  WHERE target_type = 'step' AND target_id IN (
+    SELECT te.id FROM tool_events te
+    WHERE te.session_id IN (SELECT id FROM sessions WHERE project_id = @project_id)
+  )
+`)
 const deleteEdgesByProjectStmt = db.prepare(`
   DELETE FROM code_unit_edges
   WHERE from_unit_id IN (SELECT id FROM code_units WHERE project_id = @project_id)
@@ -135,6 +155,11 @@ const deleteVersionsByProjectStmt = db.prepare(`
 `)
 const deleteToolEventsByProjectStmt = db.prepare(`
   DELETE FROM tool_events
+  WHERE session_id IN (SELECT id FROM sessions WHERE project_id = @project_id)
+`)
+// assistant_notes.session_id/prompt_id 둘 다 FK(foreign_keys=ON)라 sessions/prompts보다 먼저 지워야 한다.
+const deleteAssistantNotesByProjectStmt = db.prepare(`
+  DELETE FROM assistant_notes
   WHERE session_id IN (SELECT id FROM sessions WHERE project_id = @project_id)
 `)
 const deletePromptsByProjectStmt = db.prepare(`
@@ -233,9 +258,12 @@ function deleteProject(projectId: string): void {
   const run = db.transaction((id: string): void => {
     deleteExplanationsByPromptStmt.run({ project_id: id })
     deleteExplanationsByVersionStmt.run({ project_id: id })
+    deleteExplanationsByStepStmt.run({ project_id: id })
     deleteEdgesByProjectStmt.run({ project_id: id })
     deleteVersionsByProjectStmt.run({ project_id: id })
     deleteToolEventsByProjectStmt.run({ project_id: id })
+    // assistant_notes.prompt_id/session_id 둘 다 FK라 prompts/sessions보다 먼저 지워야 한다.
+    deleteAssistantNotesByProjectStmt.run({ project_id: id })
     deletePromptsByProjectStmt.run({ project_id: id })
     deleteLectureNotesByProjectStmt.run({ project_id: id })
     deleteSessionsByProjectStmt.run({ project_id: id })
@@ -267,8 +295,26 @@ const getPromptsBySession = db.prepare(`
   ORDER BY turn_index ASC
 `)
 
+const getNotesBySessionStmt = db.prepare(`
+  SELECT * FROM assistant_notes
+  WHERE session_id = @session_id
+  ORDER BY created_at ASC, rowid ASC
+`)
+
+// step-worker와 동일한 skill_level 스코프로 조회 — target_id(스텝 id)는 그 스텝의
+// 첫 tool_event id라 세션 경계 없이도 전역 유일하므로 세션으로 다시 스코프할 필요 없다.
+const getStepExplanationsStmt = db.prepare(`
+  SELECT * FROM ai_explanations WHERE target_type = 'step' AND skill_level = @skill_level
+`)
+
+const getSessionEndedAtStmt = db.prepare(`SELECT ended_at FROM sessions WHERE id = @id`)
+
+// 세션 재개(resume)로 발급된 논리 id들은 원본 세션의 started_at을 그대로 물려받아
+// 서로 값이 같을 수 있다(resolveLogicalSessionId 참조) — started_at만으로 정렬하면
+// 동점 처리 순서가 SQLite 쿼리 플래너에 좌우돼 "진짜 최근 것"이 안 나올 수 있으므로
+// rowid(삽입 순서) DESC를 2차 정렬 기준으로 둬 항상 가장 나중에 만들어진 행이 이긴다.
 const getLatestSessionId = db.prepare(`
-  SELECT id FROM sessions WHERE project_id = @project_id ORDER BY started_at DESC LIMIT 1
+  SELECT id FROM sessions WHERE project_id = @project_id ORDER BY started_at DESC, rowid DESC LIMIT 1
 `)
 
 const getSkillLevelStmt = db.prepare(`
@@ -463,6 +509,13 @@ function registerIpcHandlers(): void {
     }
   )
 
+  // 렌더러 마운트 캐치업용 pull — 'step-live-status' push는 워커가 이 모듈 로드
+  // 시점(창이 아직 없을 때)에 쏘는 최초 상태를 유실할 수 있어, 마운트 시 한 번
+  // 당겨와야 한다(step-worker.ts의 getLiveStatus 참조).
+  ipcMain.handle('step:getLiveStatus', (): LiveStatus => {
+    return stepWorker.getLiveStatus()
+  })
+
   ipcMain.handle('db:getSessions', (_event, projectId: string): SessionWithPreview[] => {
     return getAllSessions.all({ project_id: projectId }) as SessionWithPreview[]
   })
@@ -491,6 +544,36 @@ function registerIpcHandlers(): void {
         session_id: sessionId,
         skill_level: skillLevel
       }) as AiExplanation[]
+    }
+  )
+
+  // 실시간 진행 로그(활동 탭 "바뀐 구조와 변경사항"): step-worker와 똑같은 방식으로
+  // (동일한 groupIntoSteps 알고리즘) 세션의 이벤트/노트를 다시 스텝으로 나눈 뒤,
+  // 이미 생성된 ai_explanations(target_type='step')를 조인해 붙인다 — 스텝을 별도
+  // 테이블에 저장하지 않고 항상 이렇게 파생시켜서 두 곳(worker/조회)의 경계 정의가
+  // 어긋날 일이 없다.
+  ipcMain.handle(
+    'db:getSteps',
+    (_event, sessionId: string, skillLevel: SkillLevel): StepWithExplanation[] => {
+      const session = getSessionEndedAtStmt.get({ id: sessionId }) as { ended_at: string | null } | undefined
+      const events = getToolEventsBySession.all({ session_id: sessionId }) as ToolEvent[]
+      const notes = getNotesBySessionStmt.all({ session_id: sessionId }) as AssistantNote[]
+      const steps = groupIntoSteps(notes, events)
+      const explanationsByStepId = new Map(
+        (getStepExplanationsStmt.all({ skill_level: skillLevel }) as AiExplanation[]).map((e) => [
+          e.target_id,
+          e
+        ])
+      )
+      const lastStep = steps[steps.length - 1]
+
+      return steps.map((step) => ({
+        stepId: step.id,
+        promptId: step.promptId,
+        startedAt: new Date(step.startedAt).toISOString(),
+        inProgress: (session?.ended_at ?? null) === null && step === lastStep,
+        explanation: explanationsByStepId.get(step.id) ?? null
+      }))
     }
   )
 
@@ -592,6 +675,15 @@ function registerIpcHandlers(): void {
         target_id: versionId,
         skill_level: skillLevel,
         content: caption.caption,
+        key_code_snippet: null,
+        key_code_lang: null,
+        key_code_file: null,
+        key_code_other_files: null,
+        key_code_explanation: null,
+        key_code_importance: null,
+        key_code_application: null,
+        error_detail: null,
+        status: null,
         concept_tags: JSON.stringify(caption.conceptTags),
         created_at: new Date().toISOString()
       }
@@ -681,6 +773,7 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   stopCaptionWorker()
   stopLectureNoteWorker()
+  stepWorker.stop()
   void (async () => {
     try {
       // "완료" 버튼을 안 누르고 창을 그냥 닫아도(Cmd+Q 등) 지금 관찰 중이던 세션을

@@ -1,8 +1,9 @@
 import { GitBranch } from 'lucide-react'
-import type { AiExplanation, CodeUnit, CodeUnitEdge, CodeUnitVersionWithUnit } from '@shared/types'
+import type { AiExplanation, CodeUnit, CodeUnitEdge, CodeUnitVersionWithUnit, StepWithExplanation } from '@shared/types'
+import { StepProgressLog } from './StepProgressLog'
 import { StructureOverview } from './StructureOverview'
 import { TurnChanges } from './TurnChanges'
-import type { TurnListItem } from './TurnList'
+import { ORPHAN_TURN_ID, type TurnListItem } from './TurnList'
 import { UnitTimeline } from './UnitTimeline'
 
 interface TurnDetailPanelProps {
@@ -11,6 +12,7 @@ interface TurnDetailPanelProps {
   edges: CodeUnitEdge[]
   versions: CodeUnitVersionWithUnit[]
   versionExplanations: Map<string, AiExplanation>
+  steps: StepWithExplanation[]
   selectedUnitId: string | null
   onSelectUnit: (unitId: string) => void
   unitVersions: CodeUnitVersionWithUnit[]
@@ -18,9 +20,9 @@ interface TurnDetailPanelProps {
 }
 
 // 관제실의 "프롬프트 상세" 큰 화면: RecentTurns(개요 탭 "직전 실행의 과정")에서 고른
-// 프롬프트 하나에 대해 바뀐 구조(미니 구조도)와 유닛별 변경사항(diff)을 한 카드에
-// 모아 보여준다. feature 요약(explainTurn 캡션)은 RecentTurns 항목 자체에 이미 나와
-// 있어 여기서 다시 반복하지 않는다.
+// 프롬프트 하나에 대해 바뀐 구조(미니 구조도) + 실시간 진행 로그 + 유닛별 변경사항
+// (diff)을 한 카드에 모아 보여준다. feature 요약(explainTurn 캡션)은 RecentTurns
+// 항목 자체에 이미 나와 있어 여기서 다시 반복하지 않는다.
 // selectedUnitId/onSelectUnit/unitVersions/unitVersionExplanations는 App의 전역
 // useUnitTimeline 선택 상태를 그대로 공유한다 — 구조도에서 컴포넌트(유닛)를 클릭하면
 // 그 유닛의 전체 버전 이력(코드 타임라인)이 이 프롬프트의 diff와 별개로 아래 펼쳐진다.
@@ -30,6 +32,7 @@ export function TurnDetailPanel({
   edges,
   versions,
   versionExplanations,
+  steps,
   selectedUnitId,
   onSelectUnit,
   unitVersions,
@@ -45,7 +48,13 @@ export function TurnDetailPanel({
     )
   }
 
-  const isEmpty = units.length === 0 && versions.length === 0
+  // 스텝은 세션 전체 기준으로 계산되므로(groupIntoSteps가 promptId로 버킷팅) 이
+  // 턴에 속한 것만 골라낸다 — 프롬프트 없는 수동 수정 묶음(ORPHAN_TURN_ID)은
+  // promptId가 null인 스텝과 짝짓는다.
+  const turnPromptId = turn.turnId === ORPHAN_TURN_ID ? null : turn.turnId
+  const turnSteps = steps.filter((step) => step.promptId === turnPromptId)
+
+  const isEmpty = units.length === 0 && versions.length === 0 && turnSteps.length === 0
   // 지금 선택된 유닛이 이 프롬프트에서 실제로 바뀐 유닛일 때만 타임라인을 보여준다 —
   // 다른 프롬프트를 보다가 고른 선택이 남아있을 수 있어(선택 상태는 전역 공유), 이
   // 프롬프트의 구조도에 없는 유닛이면 굳이 안 맞는 타임라인을 보여주지 않는다.
@@ -66,13 +75,15 @@ export function TurnDetailPanel({
         </p>
       ) : (
         <>
-          <StructureOverview
-            units={units}
-            edges={edges}
-            selectedUnitId={selectedUnitId}
-            onSelectUnit={onSelectUnit}
-            heightClassName="h-[240px]"
-          />
+          {units.length > 0 && (
+            <StructureOverview
+              units={units}
+              edges={edges}
+              selectedUnitId={selectedUnitId}
+              onSelectUnit={onSelectUnit}
+              heightClassName="h-[240px]"
+            />
+          )}
           {selectedUnit && (
             <div className="border-t border-border p-3.5">
               <p className="mb-3 text-[11px] font-semibold tracking-[0.04em] text-[#6d7069]">
@@ -81,9 +92,19 @@ export function TurnDetailPanel({
               <UnitTimeline versions={unitVersions} explanations={unitVersionExplanations} />
             </div>
           )}
-          <div className="max-h-[320px] overflow-y-auto border-t border-border p-3.5">
-            <TurnChanges versions={versions} explanations={versionExplanations} />
-          </div>
+          {turnSteps.length > 0 && (
+            <div className="max-h-[420px] overflow-y-auto border-t border-border p-3.5">
+              <p className="mb-2.5 text-[11px] font-semibold tracking-[0.04em] text-[#6d7069]">
+                실시간 진행 로그
+              </p>
+              <StepProgressLog steps={turnSteps} />
+            </div>
+          )}
+          {versions.length > 0 && (
+            <div className="max-h-[320px] overflow-y-auto border-t border-border p-3.5">
+              <TurnChanges versions={versions} explanations={versionExplanations} />
+            </div>
+          )}
         </>
       )}
     </section>

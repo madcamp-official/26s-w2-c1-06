@@ -80,10 +80,39 @@ export class Repo {
       .run(params);
   }
 
-  updateToolEventResult(toolUseId: string, status: 'success' | 'error', durationMs: number): void {
+  // resultContent: tool_result의 텍스트화된 내용(성공 출력/에러 메시지, truncate됨) —
+  // 실시간 진행 로그(step-worker.ts)가 실패 이유를 보여줄 근거. 없으면(추출 실패 등) null.
+  updateToolEventResult(
+    toolUseId: string,
+    status: 'success' | 'error',
+    durationMs: number,
+    resultContent: string | null
+  ): void {
     this.db
-      .prepare(`UPDATE tool_events SET status = @status, duration_ms = @durationMs WHERE id = @toolUseId`)
-      .run({ toolUseId, status, durationMs });
+      .prepare(
+        `UPDATE tool_events SET status = @status, duration_ms = @durationMs, result_content = @resultContent WHERE id = @toolUseId`
+      )
+      .run({ toolUseId, status, durationMs, resultContent });
+  }
+
+  // --- assistant_notes ----------------------------------------------------
+  // 턴당 1개만 살아남는 prompts.plan_text 폴백과 달리, assistant_text 조각 전부를
+  // 보존한다 — 실시간 진행 로그의 스텝 카드가 "그때 에이전트가 남긴 말"을 참고
+  // 텍스트로 붙일 때 쓴다(step-worker.ts). id는 호출부가 결정론적으로 구성해
+  // 전달한다(세션+timestamp+텍스트 해시) — 리플레이 시 안전하게 재실행되도록.
+  insertAssistantNote(params: {
+    id: string;
+    sessionId: string;
+    promptId: string | null;
+    text: string;
+    createdAt: string;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT OR IGNORE INTO assistant_notes (id, session_id, prompt_id, text, created_at)
+         VALUES (@id, @sessionId, @promptId, @text, @createdAt)`
+      )
+      .run(params);
   }
 
   getToolEvent(toolUseId: string): { tool_name: string; file_path: string | null; raw_payload: string; created_at: string } | undefined {

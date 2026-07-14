@@ -131,3 +131,28 @@ function parseAssistantLine(obj: RawLine, sessionId: string, timestamp: string):
 }
 
 type ParsedTodo = { content: string; status: string; activeForm: string };
+
+const RESULT_TEXT_MAX_LENGTH = 1000;
+
+/**
+ * tool_result.content(문자열 또는 {type:'text', text}[] 블록 배열)를 사람이 읽을 수 있는
+ * 텍스트로 펼친다. 성공 출력/에러 메시지를 tool_events.result_content에 저장해 실시간
+ * 진행 로그(step-worker.ts)가 "왜 실패했는지"를 보여줄 근거로 쓸 수 있게 한다.
+ * 길이는 프롬프트 토큰/DB 용량을 고려해 truncate한다.
+ */
+export function extractResultText(content: unknown): string | null {
+  let text: string;
+  if (typeof content === 'string') {
+    text = content;
+  } else if (Array.isArray(content)) {
+    text = content
+      .filter((block): block is ContentBlock => typeof block === 'object' && block !== null)
+      .filter((block) => block.type === 'text' && typeof block.text === 'string')
+      .map((block) => block.text as string)
+      .join('\n');
+  } else {
+    return null;
+  }
+  if (!text) return null;
+  return text.length > RESULT_TEXT_MAX_LENGTH ? text.slice(0, RESULT_TEXT_MAX_LENGTH) + '…' : text;
+}

@@ -37,7 +37,9 @@ export interface OnboardingProfile extends OnboardingCourses, OnboardingProjects
 // 'prompt' = 턴(요청) 전체를 묶은 feature 단위 해설. 개별 tool_event(Read/Write/Bash 등)
 // 단위 해설은 더 이상 생성하지 않는다 — 관제실은 코딩 수정이 "완료된" 턴 단위로만
 // AI를 호출해 정리한다(caption-worker.ts 참조). 'tool_event'는 과거 데이터 호환용으로 남겨둔다.
-export type AiExplanationTargetType = 'tool_event' | 'prompt' | 'code_unit_version' | 'qna'
+// 'step'은 실시간 진행 로그(step-worker.ts) 전용 — 턴보다 더 잘게(유휴시간/이벤트
+// 개수 기준) 나눈 단위로, 턴이 끝나기 전에도(진행 중에도) 실시간으로 채워진다.
+export type AiExplanationTargetType = 'tool_event' | 'prompt' | 'code_unit_version' | 'qna' | 'step'
 
 export interface Project {
   id: string
@@ -79,6 +81,20 @@ export interface ToolEvent {
   status: ToolStatus
   duration_ms: number | null
   raw_payload: string | null
+  // tool_result의 텍스트화된 내용(성공 출력/에러 메시지, truncate됨) — 실시간 진행
+  // 로그가 "왜 실패했는지" 보여줄 근거(step-worker.ts).
+  result_content: string | null
+  created_at: string | null
+}
+
+// 에이전트의 assistant_text 조각 전부(턴당 1개만 살아남는 prompts.plan_text 폴백과
+// 달리 전부 보존). 스텝 경계는 아니지만, 그 시간대에 있던 note는 진행 로그 카드의
+// 참고 텍스트(요약 실패 시 폴백)로 쓰인다.
+export interface AssistantNote {
+  id: string
+  session_id: string
+  prompt_id: string | null
+  text: string
   created_at: string | null
 }
 
@@ -100,6 +116,9 @@ export interface CodeUnitVersion {
   diff_text: string | null
   tool_event_id: string | null
   prompt_id: string | null
+  // 이 버전을 만든 스텝의 id(=그 스텝 첫 tool_event의 id). pipeline insert 시점엔
+  // 스텝 개념이 없어 항상 null로 들어오고, step-worker가 역추적해 채운다.
+  step_id: string | null
   created_at: string | null
 }
 
@@ -130,8 +149,30 @@ export interface AiExplanation {
   target_id: string
   skill_level: SkillLevel
   content: string
+  // 아래는 target_type === 'step'(실시간 진행 로그) 행에만 채워짐 — 그 외 행은 전부 null.
+  key_code_snippet: string | null // 결정론적으로 추출된 실제 diff(AI가 만들지 않음)
+  key_code_lang: string | null
+  key_code_file: string | null
+  key_code_other_files: string | null // JSON 배열 문자열 — 같은 스텝에서 함께 바뀐 나머지 파일
+  key_code_explanation: string | null // 이 코드가 무엇인지
+  key_code_importance: string | null // 이 코드가 중요한 이유
+  key_code_application: string | null // 이 코드로 배우는 점(학습 포인트)
+  error_detail: string | null // 실패 스텝의 원본 에러 메시지(truncate만, AI 생성 아님)
+  status: 'success' | 'failed' | null // 스텝에 속한 tool_event 중 error가 있으면 failed
   concept_tags: string | null // JSON 배열 문자열
   created_at: string | null
+}
+
+// db:getSteps 반환 형태: shared/steps.ts의 groupIntoSteps로 나눈 스텝 메타데이터 +
+// 아직 생성 안 됐을 수 있는 ai_explanations(target_type='step') 조인 결과.
+// explanation이 null이면 step-worker가 아직 요약하지 않은 것(진행 중 스텝이거나
+// 대기 중) — 렌더러는 "생성 중…" 상태로 보여준다.
+export interface StepWithExplanation {
+  stepId: string
+  promptId: string | null
+  startedAt: string // ISO
+  inProgress: boolean // 세션이 안 끝났고 이 스텝이 마지막 스텝인 경우(아직 유휴시간 전)
+  explanation: AiExplanation | null
 }
 
 export interface UserSetting {

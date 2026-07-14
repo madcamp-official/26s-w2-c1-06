@@ -4,6 +4,9 @@ import type {
   AIProvider,
   ContextBundle,
   SessionTrace,
+  StepInput,
+  StepKeyCodeExplanation,
+  StepSummary,
   TurnCaption,
   VersionCaption
 } from '../types'
@@ -15,6 +18,10 @@ import {
   EXPLAIN_VERSIONS_RESPONSE_SCHEMA
 } from '../prompt-templates/explainVersionsPrompt'
 import { buildLectureNotePrompt } from '../prompt-templates/lectureNotePrompt'
+import {
+  buildSummarizeStepsPrompt,
+  SUMMARIZE_STEPS_RESPONSE_SCHEMA
+} from '../prompt-templates/summarizeStepsPrompt'
 
 // Gemini 무료 티어 쿼터는 모델별로 별도 집계된다(429 응답의 quotaId가 모델명을
 // 포함 — 예: "GenerateRequestsPerDayPerProjectPerModel-FreeTier"). 즉 flash 모델의
@@ -42,6 +49,30 @@ interface RawTurnCaption {
   conceptTags?: string[]
 }
 
+interface RawStepKeyCode {
+  explanation?: string
+  importance?: string
+  application?: string
+  conceptTags?: string[]
+}
+
+interface RawStepSummary {
+  stepId?: string
+  summary?: string
+  keyCode?: RawStepKeyCode | null
+}
+
+function sanitizeStepKeyCode(raw: RawStepKeyCode | null | undefined): StepKeyCodeExplanation | null {
+  if (!raw) return null
+  if (!raw.explanation || !raw.importance || !raw.application) return null
+  return {
+    explanation: raw.explanation,
+    importance: raw.importance,
+    application: raw.application,
+    conceptTags: raw.conceptTags ?? []
+  }
+}
+
 export class GeminiProvider implements AIProvider {
   private readonly clients = new Map<string, GoogleGenAI>()
   // 모델별 "이 시각 이후에 다시 시도해도 됨" 타임스탬프. 프로세스 수명 동안 유지된다.
@@ -63,6 +94,25 @@ export class GeminiProvider implements AIProvider {
       caption: raw.caption ?? '',
       conceptTags: raw.conceptTags ?? []
     }
+  }
+
+  async summarizeSteps(steps: StepInput[], skillLevel: SkillLevel): Promise<StepSummary[]> {
+    if (steps.length === 0) return []
+
+    const raw = await this.generateJson<RawStepSummary[]>(
+      buildSummarizeStepsPrompt(steps, skillLevel),
+      SUMMARIZE_STEPS_RESPONSE_SCHEMA,
+      []
+    )
+    const knownIds = new Set(steps.map((step) => step.stepId))
+
+    return raw
+      .filter((item) => item.stepId && knownIds.has(item.stepId) && item.summary?.trim())
+      .map((item) => ({
+        stepId: item.stepId!,
+        summary: item.summary!.trim(),
+        keyCode: sanitizeStepKeyCode(item.keyCode)
+      }))
   }
 
   async explainUnitVersions(

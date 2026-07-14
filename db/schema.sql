@@ -45,6 +45,19 @@ CREATE TABLE IF NOT EXISTS tool_events (
   status TEXT DEFAULT 'pending',  -- pending | success | error (tool_result 매칭 시 갱신)
   duration_ms INTEGER,      -- tool_use → tool_result 소요시간
   raw_payload TEXT,
+  result_content TEXT,      -- tool_result의 텍스트화된 내용(성공 출력/에러 메시지, truncate됨).
+                            -- 실시간 진행 로그가 "왜 실패했는지" 보여줄 근거(step-worker.ts).
+  created_at DATETIME
+);
+
+-- 에이전트의 assistant_text 조각 전부(턴당 1개만 살아남는 prompts.plan_text
+-- 폴백과 달리 전부 보존). 스텝 경계는 아니지만(유휴시간/이벤트 개수 기준), 그
+-- 시간대에 있던 note는 진행 로그 카드의 참고 텍스트(요약 실패 시 폴백)로 쓰인다.
+CREATE TABLE IF NOT EXISTS assistant_notes (
+  id TEXT PRIMARY KEY,
+  session_id TEXT REFERENCES sessions(id),
+  prompt_id TEXT REFERENCES prompts(id),
+  text TEXT,
   created_at DATETIME
 );
 
@@ -66,6 +79,10 @@ CREATE TABLE IF NOT EXISTS code_unit_versions (
   diff_text TEXT,
   tool_event_id TEXT REFERENCES tool_events(id),
   prompt_id TEXT REFERENCES prompts(id),
+  step_id TEXT,             -- 이 버전을 만든 스텝의 id(=그 스텝 첫 tool_event의 id).
+                            -- pipeline insert 시점엔 스텝 개념이 없어 항상 NULL로 들어오고,
+                            -- step-worker가 매 tick마다 tool_event_id로 역추적해 채운다
+                            -- (구조도 노드 클릭 → 진행 로그 카드 연결에 사용).
   created_at DATETIME,
   UNIQUE(unit_id, version_no)
 );
@@ -89,13 +106,27 @@ CREATE TABLE IF NOT EXISTS lecture_notes (
 );
 
 -- 난이도별 AI 해설 캐시 (SPEC.md 5.1)
+-- step 행(실시간 진행 로그, step-worker.ts)은 content(짧은 요약) + key_code_*
+-- (결정론적으로 뽑은 실제 diff + AI가 채운 설명/중요도/학습포인트)를 쓴다.
+-- prompt/code_unit_version/qna 행은 기존 그대로 content(+ code_unit_version만 concept_tags)만 채우고
+-- key_code_*/error_detail/status는 전부 null.
 CREATE TABLE IF NOT EXISTS ai_explanations (
   id TEXT PRIMARY KEY,
-  target_type TEXT,         -- tool_event | code_unit_version | qna
+  target_type TEXT,         -- tool_event | prompt | code_unit_version | qna | step
   target_id TEXT,
   skill_level TEXT,         -- beginner | intermediate | advanced
   content TEXT,
-  concept_tags TEXT,        -- JSON 배열, 예: ["디바운스","useEffect"] → Level 3 개념 태그 (SPEC 5장)
+  key_code_snippet TEXT,    -- 핵심 코드 스니펫(nullable) — 결정론적으로 추출된 실제 diff, AI가 만들지 않음. step 행 전용.
+  key_code_lang TEXT,       -- 코드 언어(ts, tsx 등). step 행 전용.
+  key_code_file TEXT,       -- 코드가 위치한 파일 경로. step 행 전용.
+  key_code_other_files TEXT,     -- 같은 스텝에서 함께 바뀐 나머지 파일 목록(JSON 배열). step 행 전용.
+  key_code_explanation TEXT,     -- 이 코드가 무엇인지. step 행 전용.
+  key_code_importance TEXT,      -- 이 코드가 중요한 이유. step 행 전용.
+  key_code_application TEXT,     -- 이 코드로 배우는 점(학습 포인트). step 행 전용.
+  error_detail TEXT,        -- 실패 스텝의 원본 에러 메시지(요약 없이 truncate만). step 행 전용.
+  status TEXT,              -- success | failed. step 행 전용 — 스텝에 속한 tool_event 중
+                            -- 하나라도 error가 있으면 failed(로컬 계산, AI 응답과 무관).
+  concept_tags TEXT,        -- JSON 배열, 예: ["디바운스","useEffect"] → Level 3 개념 태그 (SPEC 5장, code_unit_version 전용)
   created_at DATETIME,
   UNIQUE(target_type, target_id, skill_level)
 );
@@ -110,6 +141,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
 -- (트레이스 패널: 세션별 시간순 / 타임라인: 유닛별 버전 체인 / 구조도: 파일별 유닛)
 CREATE INDEX IF NOT EXISTS idx_tool_events_session_time ON tool_events(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_prompts_session_turn ON prompts(session_id, turn_index);
+CREATE INDEX IF NOT EXISTS idx_assistant_notes_session_time ON assistant_notes(session_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_versions_unit ON code_unit_versions(unit_id, version_no);
 CREATE INDEX IF NOT EXISTS idx_units_file ON code_units(file_path);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, started_at);

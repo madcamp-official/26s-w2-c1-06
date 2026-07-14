@@ -22,12 +22,14 @@ import { StructureOverview } from './components/StructureOverview'
 import { TurnDetailPanel } from './components/TurnDetailPanel'
 import { buildTurnList, ORPHAN_TURN_ID } from './components/TurnList'
 import { useLectureNotes } from './hooks/useLectureNotes'
+import { useLiveStatus } from './hooks/useLiveStatus'
 import { useMonitoring } from './hooks/useMonitoring'
 import { useOnboarding } from './hooks/useOnboarding'
 import { useProjects } from './hooks/useProjects'
 import { useQna } from './hooks/useQna'
 import { useSessionTrace } from './hooks/useSessionTrace'
 import { useSkillLevel } from './hooks/useSkillLevel'
+import { useSteps } from './hooks/useSteps'
 import { useTurnDetail } from './hooks/useTurnDetail'
 import { useUnitTimeline } from './hooks/useUnitTimeline'
 import type { Project } from '@shared/types'
@@ -118,6 +120,10 @@ function App() {
     selectedSessionId
   )
   const timeline = useUnitTimeline(skillLevel, currentProjectId)
+  // 실시간 진행 로그(활동 탭 "바뀐 구조와 변경사항") — 턴이 끝나길 기다리지 않고
+  // 스텝 단위로 채워진다. liveStatus는 "지금 하는 중" 한 줄, DB 폴링보다 훨씬 빠르다.
+  const steps = useSteps(sessionId, skillLevel)
+  const liveStatus = useLiveStatus()
   const { notes, regenerate } = useLectureNotes(currentProjectId)
   const { needsOnboarding, complete } = useOnboarding(setSkillLevel)
   const qna = useQna(sessionId, skillLevel)
@@ -397,6 +403,8 @@ function App() {
                 turnEdges={turnEdges}
                 turnDetail={turnDetail}
                 timeline={timeline}
+                steps={steps}
+                liveStatus={liveStatus}
                 filesTouched={filesTouched}
                 notes={notes}
                 recentNotes={recentNotes}
@@ -438,6 +446,8 @@ interface ProjectPageProps {
   turnEdges: ReturnType<typeof useUnitTimeline>['edges']
   turnDetail: ReturnType<typeof useTurnDetail>
   timeline: ReturnType<typeof useUnitTimeline>
+  steps: ReturnType<typeof useSteps>
+  liveStatus: ReturnType<typeof useLiveStatus>
   filesTouched: Array<[string, number]>
   notes: ReturnType<typeof useLectureNotes>['notes']
   recentNotes: ReturnType<typeof useLectureNotes>['notes']
@@ -473,6 +483,8 @@ function ProjectPage({
   turnEdges,
   turnDetail,
   timeline,
+  steps,
+  liveStatus,
   filesTouched,
   notes,
   recentNotes,
@@ -574,6 +586,7 @@ function ProjectPage({
               detailEdges={turnEdges}
               detailVersions={turnDetail.versions}
               detailVersionExplanations={turnDetail.explanations}
+              steps={steps}
               selectedUnitId={timeline.selectedUnitId}
               onSelectUnit={timeline.selectUnit}
               unitVersions={timeline.versions}
@@ -688,6 +701,14 @@ function ProjectPage({
                   </span>
                 </>
               )}
+              {monitoring.isMonitoring && !liveStatus.idle && liveStatus.text && (
+                <>
+                  <span className="text-[#c7c6bd]">·</span>
+                  <span className="truncate font-mono text-[10px] font-normal tracking-normal text-[#6d7069]">
+                    지금: {liveStatus.text}
+                  </span>
+                </>
+              )}
             </div>
             <h2 className="max-w-[900px] text-[22px] font-semibold leading-tight tracking-[-0.03em] sm:text-[25px]">
               {currentTurn?.user_text ??
@@ -707,6 +728,7 @@ function ProjectPage({
             explanations={explanations}
             selectedTurnId={effectiveTurnId}
             onSelectTurn={onSelectTurn}
+            liveStatus={liveStatus}
           />
           <TurnDetailPanel
             turn={selectedTurnItem}
@@ -714,6 +736,7 @@ function ProjectPage({
             edges={turnEdges}
             versions={turnDetail.versions}
             versionExplanations={turnDetail.explanations}
+            steps={steps}
             selectedUnitId={timeline.selectedUnitId}
             onSelectUnit={timeline.selectUnit}
             unitVersions={timeline.versions}

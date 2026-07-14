@@ -5,6 +5,7 @@ import type {
   CodeUnitEdge,
   CodeUnitVersionWithUnit,
   Prompt,
+  StepWithExplanation,
   ToolEvent
 } from '@shared/types'
 import { formatRelativeTime } from '@shared/format'
@@ -22,6 +23,7 @@ interface RecentTurnsProps {
   detailEdges: CodeUnitEdge[]
   detailVersions: CodeUnitVersionWithUnit[]
   detailVersionExplanations: Map<string, AiExplanation>
+  steps: StepWithExplanation[]
   selectedUnitId: string | null
   onSelectUnit: (unitId: string) => void
   unitVersions: CodeUnitVersionWithUnit[]
@@ -49,6 +51,7 @@ export function RecentTurns({
   detailEdges,
   detailVersions,
   detailVersionExplanations,
+  steps,
   selectedUnitId,
   onSelectUnit,
   unitVersions,
@@ -145,6 +148,7 @@ export function RecentTurns({
                       edges={detailEdges}
                       versions={detailVersions}
                       versionExplanations={detailVersionExplanations}
+                      steps={steps}
                       selectedUnitId={selectedUnitId}
                       onSelectUnit={onSelectUnit}
                       unitVersions={unitVersions}

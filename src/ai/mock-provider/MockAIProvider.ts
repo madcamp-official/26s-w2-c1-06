@@ -1,5 +1,13 @@
 import type { CodeUnitVersionWithUnit, Prompt, SkillLevel, ToolEvent } from '@shared/types'
-import type { AIProvider, ContextBundle, SessionTrace, TurnCaption, VersionCaption } from '../types'
+import type {
+  AIProvider,
+  ContextBundle,
+  SessionTrace,
+  StepInput,
+  StepSummary,
+  TurnCaption,
+  VersionCaption
+} from '../types'
 
 const TONE_PREFIX: Record<SkillLevel, string> = {
   novice: '(아주 쉽게 설명하면)',
@@ -31,6 +39,30 @@ export class MockAIProvider implements AIProvider {
         `${TONE_PREFIX[skillLevel]} "${prompt.user_text ?? '요청'}" 요청으로 ${files.length}개 파일에 걸쳐 ${events.length}개 작업(${tools.join('/')})을 진행해 기능을 완성했어요.`.trim(),
       conceptTags: tools.slice(0, 3)
     }
+  }
+
+  async summarizeSteps(steps: StepInput[], skillLevel: SkillLevel): Promise<StepSummary[]> {
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    return steps.map((step) => {
+      const failed = step.events.some((e) => e.status === 'error')
+      const tools = [...new Set(step.events.map((e) => e.tool_name))]
+      return {
+        stepId: step.stepId,
+        summary:
+          `${TONE_PREFIX[skillLevel]} ${tools.join('/')} 작업이 ${failed ? '막혔어요' : '끝났어요'}.`.trim(),
+        keyCode: step.codeCandidate
+          ? {
+              explanation: `${step.codeCandidate.filePath}에서 코드가 바뀌었어요.`,
+              importance: failed
+                ? '이 부분이 방금 실패의 원인이 된 지점이에요.'
+                : '앞으로 이 코드 형태를 다른 곳에서도 다시 쓰게 되니 기억해두세요.',
+              application: '비슷한 변경을 할 때 이 코드 형태를 참고해보세요.',
+              conceptTags: [step.codeCandidate.lang]
+            }
+          : null
+      }
+    })
   }
 
   async explainUnitVersions(

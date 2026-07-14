@@ -11,8 +11,10 @@ import type {
   Prompt,
   SessionWithPreview,
   SkillLevel,
+  StepWithExplanation,
   ToolEvent
 } from '@shared/types'
+import type { LiveStatus } from '@shared/stepProgress'
 
 export interface MonitoringStatus {
   isMonitoring: boolean
@@ -36,6 +38,8 @@ const factcodingApi = {
   setSkillLevel: (level: SkillLevel): Promise<void> => ipcRenderer.invoke('db:setSkillLevel', level),
   getExplanations: (sessionId: string, skillLevel: SkillLevel): Promise<AiExplanation[]> =>
     ipcRenderer.invoke('db:getExplanations', sessionId, skillLevel),
+  getSteps: (sessionId: string, skillLevel: SkillLevel): Promise<StepWithExplanation[]> =>
+    ipcRenderer.invoke('db:getSteps', sessionId, skillLevel),
   getCodeUnits: (projectId: string): Promise<CodeUnit[]> => ipcRenderer.invoke('db:getCodeUnits', projectId),
   getUnitVersions: (unitId: string): Promise<CodeUnitVersionWithUnit[]> =>
     ipcRenderer.invoke('db:getUnitVersions', unitId),
@@ -78,6 +82,15 @@ const factcodingApi = {
     const listener = (_event: unknown, kind: DataChangeKind): void => callback(kind)
     ipcRenderer.on('data-changed', listener)
     return () => ipcRenderer.removeListener('data-changed', listener)
+  },
+  // 실시간 진행 로그의 "지금 하는 중" 한 줄 상태 — data-changed(ai_explanations 확정
+  // 시점)보다 훨씬 빠른 별도 주기로 push된다(step-worker.ts). 마운트 캐치업은
+  // getLiveStatus(pull)로 한 번 당겨온다.
+  getLiveStatus: (): Promise<LiveStatus> => ipcRenderer.invoke('step:getLiveStatus'),
+  onStepLiveStatus: (callback: (status: LiveStatus) => void): (() => void) => {
+    const listener = (_event: unknown, status: LiveStatus): void => callback(status)
+    ipcRenderer.on('step-live-status', listener)
+    return () => ipcRenderer.removeListener('step-live-status', listener)
   }
 }
 

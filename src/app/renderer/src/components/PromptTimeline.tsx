@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { CheckCircle2, Circle, FolderKanban, Loader2, MoreHorizontal } from 'lucide-react'
 import type { AiExplanation } from '@shared/types'
+import type { LiveStatus } from '@shared/stepProgress'
 import { ORPHAN_TURN_ID, type TurnListItem } from './TurnList'
 
 interface PromptTimelineProps {
@@ -8,6 +9,9 @@ interface PromptTimelineProps {
   explanations: Map<string, AiExplanation>
   selectedTurnId: string | null
   onSelectTurn: (turnId: string) => void
+  // 지금 진행 중인(마지막) 프롬프트 노드의 툴팁에 "지금 하는 중" 한 줄을 덧붙인다 —
+  // 실시간 진행 로그(step-worker.ts)와 같은 소스, 활동 탭 헤더의 표시와 동일.
+  liveStatus?: LiveStatus
 }
 
 const MAX_VISIBLE = 10
@@ -18,7 +22,13 @@ type Segment = { key: string; kind: 'ellipsis' } | { key: string; kind: 'item'; 
 // 노드로 늘어놓고(왼쪽=과거 → 오른쪽=최신) 클릭해서 고르게 한다. 세션이 길어져
 // 노드가 너무 많아지면 앞쪽(오래된) 것들을 "…" 노드 하나로 접어두고, 그 "…"를 클릭하면
 // 접어뒀던 프롬프트까지 전부 펼쳐서 같은 줄 위에서 고를 수 있게 한다.
-export function PromptTimeline({ items, explanations, selectedTurnId, onSelectTurn }: PromptTimelineProps) {
+export function PromptTimeline({
+  items,
+  explanations,
+  selectedTurnId,
+  onSelectTurn,
+  liveStatus
+}: PromptTimelineProps) {
   const [expanded, setExpanded] = useState(false)
 
   if (items.length === 0) {
@@ -89,6 +99,7 @@ export function PromptTimeline({ items, explanations, selectedTurnId, onSelectTu
                   explanation={
                     segment.item.turnId === ORPHAN_TURN_ID ? undefined : explanations.get(segment.item.turnId)
                   }
+                  liveStatus={liveStatus}
                   onSelect={() => onSelectTurn(segment.item.turnId)}
                 />
               )}
@@ -104,19 +115,25 @@ function TimelineNode({
   item,
   active,
   explanation,
+  liveStatus,
   onSelect
 }: {
   item: TurnListItem
   active: boolean
   explanation: AiExplanation | undefined
+  liveStatus: LiveStatus | undefined
   onSelect: () => void
 }) {
   const isOrphan = item.turnId === ORPHAN_TURN_ID
   const inProgress = item.isLastTurn && !explanation && !isOrphan
   const Icon = isOrphan ? FolderKanban : inProgress ? Loader2 : CheckCircle2
-  const label = isOrphan
+  const baseLabel = isOrphan
     ? '수동으로 수정된 파일들'
     : `${item.turnIndex !== null ? `프롬프트 ${item.turnIndex + 1}: ` : ''}${item.userText ?? '연결된 요청 없음'}`
+  const label =
+    inProgress && liveStatus && !liveStatus.idle && liveStatus.text
+      ? `${baseLabel} — 지금: ${liveStatus.text}`
+      : baseLabel
 
   return (
     <button
