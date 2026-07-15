@@ -163,6 +163,16 @@
 
 ### 실행 방법
 
+**설치 파일 다운로드 (별도 개발환경 없이 바로 실행):**
+
+- macOS (Apple Silicon): [Factcoding-0.1.0-arm64.dmg](https://github.com/madcamp-official/26s-w2-c1-06/releases/download/v0.1.0-build.2/Factcoding-0.1.0-arm64.dmg)
+- Windows: [Factcoding.Setup.0.1.0.exe](https://github.com/madcamp-official/26s-w2-c1-06/releases/download/v0.1.0-build.2/Factcoding.Setup.0.1.0.exe)
+- 그 외 빌드/최신 버전은 [Releases 페이지](https://github.com/madcamp-official/26s-w2-c1-06/releases)에서 확인
+
+> 서명되지 않은 빌드라 처음 실행 시 보안 경고가 뜰 수 있습니다 — macOS는 앱을 우클릭 후 "열기", Windows는 "추가 정보" → "실행"을 선택하면 됩니다. 이 공개 빌드는 진짜 API 키를 담고 있지 않아 AI 기능이 기본적으로 비활성 상태입니다(아래처럼 소스에서 직접 빌드하면 자신의 키로 AI 기능까지 쓸 수 있습니다).
+
+**소스에서 실행 (개발용, AI 기능 포함):**
+
 ```bash
 # 환경 설정 (.env.example을 복사해 OPENAI_API_KEY 또는 GEMINI_KEY_A/B 중 하나 이상 채우기)
 cp .env.example .env
@@ -177,7 +187,7 @@ npm run db:init
 npm run dev
 ```
 
-패키징된 실행 파일이 필요하면 `npm run build:win` 또는 `npm run build:mac`으로 electron-builder 빌드를 생성한다.
+패키징된 실행 파일을 직접 만들려면 `npm run build:win` 또는 `npm run build:mac`으로 electron-builder 빌드를 생성한다(위 다운로드 파일들은 `.github/workflows/build-desktop.yml`로 GitHub Actions에서 자동 빌드한 것).
 
 ### 기술 구성
 
