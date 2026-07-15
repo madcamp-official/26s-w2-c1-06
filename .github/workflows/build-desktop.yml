@@ -82,5 +82,5 @@ jobs:
             dist-artifacts/factcoding-win/*.exe \
             --repo "${{ github.repository }}" \
             --title "Factcoding $TAG" \
-            --notes "GitHub Actions로 자동 빌드된 데스크톱 앱입니다. 설치 후 바로 AI 기능(구조도 해설·강의노트·Q&A)이 동작합니다 — 진짜 API 키 대신 우리 Vercel 프록시 토큰이 담겨 있어, OpenAI/Gemini에 프록시를 거쳐 연결됩니다. 서명되지 않은 빌드라 처음 실행 시 보안 경고가 뜰 수 있습니다(macOS: 우클릭 후 '열기', Windows: '추가 정보' → '실행')."
+            --notes "Factcoding Windows 및 macOS용 프로그램 파일입니다. 설치 후 바로 AI 기능(구조도 해설·강의노트·Q&A)이 동작합니다. 서명되지 않은 빌드라 처음 실행 시 보안 경고가 뜰 수 있습니다(macOS: 우클릭 후 '열기', Windows: '추가 정보' → '실행')."
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
