@@ -15,7 +15,8 @@ import { buildAnswerQuestionPrompt } from '../prompt-templates/answerQuestionPro
 import { buildExplainTurnPrompt, EXPLAIN_TURN_RESPONSE_SCHEMA } from '../prompt-templates/explainTurnPrompt'
 import {
   buildExplainVersionsPrompt,
-  EXPLAIN_VERSIONS_RESPONSE_SCHEMA
+  EXPLAIN_VERSIONS_RESPONSE_SCHEMA,
+  sliceKeySnippet
 } from '../prompt-templates/explainVersionsPrompt'
 import { buildLectureNotePrompt } from '../prompt-templates/lectureNotePrompt'
 import {
@@ -42,6 +43,8 @@ interface RawVersionCaption {
   versionId?: string
   caption: string
   conceptTags: string[]
+  keyStartLine?: number | null
+  keyEndLine?: number | null
 }
 
 interface RawTurnCaption {
@@ -126,14 +129,19 @@ export class GeminiProvider implements AIProvider {
       EXPLAIN_VERSIONS_RESPONSE_SCHEMA,
       []
     )
-    const knownIds = new Set(versions.map((version) => version.id))
+    const versionById = new Map(versions.map((version) => [version.id, version]))
 
     return raw
-      .filter((item) => item.versionId && knownIds.has(item.versionId))
+      .filter((item) => item.versionId && versionById.has(item.versionId))
       .map((item) => ({
         versionId: item.versionId!,
         caption: item.caption,
-        conceptTags: item.conceptTags ?? []
+        conceptTags: item.conceptTags ?? [],
+        keySnippet: sliceKeySnippet(
+          versionById.get(item.versionId!)!.diff_text,
+          item.keyStartLine,
+          item.keyEndLine
+        )
       }))
   }
 

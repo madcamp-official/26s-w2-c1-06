@@ -60,6 +60,22 @@ export class Repo {
     this.db.prepare(`UPDATE prompts SET plan_text = @planText WHERE id = @promptId`).run({ promptId, planText });
   }
 
+  // Stop 훅(턴 종료) 마커 수신 시: 이 세션에서 마커 시각 이전에 시작됐고 아직 완료
+  // 표시가 없는 프롬프트를 전부 완료 처리한다. "현재 프롬프트 하나"만 찍지 않는 이유:
+  // 두 tail(transcript / session-events)의 도착 순서가 엄밀히 보장되지 않아, 마커가
+  // 늦게 도착했을 때 이미 다음 턴이 시작돼 있을 수 있다 — created_at <= 마커 시각
+  // 조건이면 그 새 턴을 잘못 완료 처리하지 않으면서 이전 턴들은 전부 안전하게 닫힌다.
+  // 반환값은 실제로 갱신된 행 수(0이면 호출자가 UI push를 생략해도 된다).
+  completePromptsThrough(sessionId: string, ts: string): number {
+    const result = this.db
+      .prepare(
+        `UPDATE prompts SET completed_at = @ts
+         WHERE session_id = @sessionId AND completed_at IS NULL AND created_at <= @ts`
+      )
+      .run({ sessionId, ts });
+    return result.changes;
+  }
+
   // --- tool_events --------------------------------------------------------
   insertToolEvent(params: {
     id: string;

@@ -54,6 +54,10 @@ export interface Session {
   project_path: string | null
   started_at: string | null
   ended_at: string | null
+  // 사용자가 UI의 "완료" 버튼을 명시적으로 누른 시각 — SessionEnd 훅/앱 종료/고아
+  // 세션 정리로 ended_at만 채워진 세션과 구분된다. 강의노트 자동 합성은 이 값이
+  // 있어야만 트리거된다(lecture-note-worker.ts).
+  completed_at: string | null
 }
 
 // 사이드바의 "지난 턴" 목록처럼 세션을 커밋 해시 대신 실제 프롬프트 내용으로 식별해
@@ -69,6 +73,9 @@ export interface Prompt {
   user_text: string | null
   plan_text: string | null
   created_at: string | null
+  // Stop 훅(매 턴 종료마다 발생)이 잡은 "에이전트 작업이 끝난 시각". NULL이면 아직
+  // 진행 중이거나 훅 신호를 못 받은 턴 — UI 스피너/진행바와 caption-worker가 사용.
+  completed_at: string | null
 }
 
 export interface ToolEvent {
@@ -150,6 +157,7 @@ export interface AiExplanation {
   skill_level: SkillLevel
   content: string
   // 아래는 target_type === 'step'(실시간 진행 로그) 행에만 채워짐 — 그 외 행은 전부 null.
+  // 예외: key_code_snippet만 'code_unit_version' 행에도 채워진다(TurnChanges "핵심 코드").
   key_code_snippet: string | null // 결정론적으로 추출된 실제 diff(AI가 만들지 않음)
   key_code_lang: string | null
   key_code_file: string | null
@@ -173,6 +181,11 @@ export interface StepWithExplanation {
   startedAt: string // ISO
   inProgress: boolean // 세션이 안 끝났고 이 스텝이 마지막 스텝인 경우(아직 유휴시간 전)
   explanation: AiExplanation | null
+  // 이 스텝에 속한 모든 tool_event id(stepId=첫 이벤트 id뿐 아니라 전체) — 렌더러가
+  // code_unit_versions.tool_event_id로 "이 코드 유닛이 어느 스텝에서 나왔는지" 매칭해
+  // 실시간 진행 로그 카드 아래에 그 스텝에서 생긴 코드 유닛을 중첩해서 보여줄 때 쓴다
+  // (TurnDetailPanel 참조).
+  toolEventIds: string[]
 }
 
 export interface UserSetting {
@@ -291,6 +304,9 @@ export interface PipelineHandle {
   on(event: 'code-units-changed', listener: () => void): void
   // SessionStart/SessionEnd 훅 마커를 반영한 직후 emit — sessions 테이블이 바뀌었다는 신호.
   on(event: 'session-updated', listener: () => void): void
+  // Stop 훅(턴 종료) 마커로 prompts.completed_at을 실제로 갱신한 직후 emit —
+  // 렌더러가 진행중 스피너/진행바를 즉시 완료 상태로 바꿀 수 있게 push하는 신호.
+  on(event: 'turn-completed', listener: () => void): void
   /**
    * 지금 실제로 DB에 기록 중인 "논리" 세션 id가 정해질 때마다 emit(세션 재개 감지 포함,
    * index.ts의 resolveLogicalSessionId 참조). session-file-changed는 JSONL 파일명(=원본

@@ -100,6 +100,13 @@ export function startStepWorker(
     SELECT target_id FROM ai_explanations WHERE target_type = 'step' AND skill_level = @skill_level
   `)
 
+  // Stop 훅(턴 종료) 신호 — 마지막 스텝이 속한 턴이 이미 완료 처리됐으면, 90초 유휴시간
+  // (STEP_IDLE_GAP_MS)을 기다리지 않고 바로 "끝난 스텝"으로 취급한다(요약 대상 포함,
+  // "지금 하는 중" 상태도 즉시 idle로).
+  const getCompletedPromptIds = db.prepare(`
+    SELECT id FROM prompts WHERE session_id = @session_id AND completed_at IS NOT NULL
+  `)
+
   const upsertStep = db.prepare(`
     INSERT INTO ai_explanations (
       id, target_type, target_id, skill_level, content,
@@ -168,10 +175,18 @@ export function startStepWorker(
       const events = getEventsBySession.all({ session_id: session.id }) as ToolEvent[]
       const notes = getNotesBySession.all({ session_id: session.id }) as AssistantNote[]
       const steps = groupIntoSteps(notes, events)
+      const completedPromptIds = new Set(
+        (getCompletedPromptIds.all({ session_id: session.id }) as { id: string }[]).map((r) => r.id)
+      )
 
       // 세션이 끝나지 않았으면 마지막 스텝은 "아직 진행 중"일 수 있어 요약 대상에서
-      // 제외한다(유휴시간이 지나기 전엔 실제로 끝난 스텝인지 알 수 없다).
-      const inProgress = session.ended_at != null || steps.length === 0 ? null : steps[steps.length - 1]
+      // 제외한다(유휴시간이 지나기 전엔 실제로 끝난 스텝인지 알 수 없다) — 단, Stop 훅이
+      // 이미 그 턴을 완료 처리했으면(completedPromptIds) 유휴시간을 기다릴 필요 없이 바로
+      // "끝난 스텝"으로 본다.
+      const lastStep = steps[steps.length - 1]
+      const lastStepTurnCompleted = lastStep?.promptId != null && completedPromptIds.has(lastStep.promptId)
+      const inProgress =
+        session.ended_at != null || steps.length === 0 || lastStepTurnCompleted ? null : lastStep
 
       const summarized = new Set(
         (getSummarizedStepIds.all({ skill_level: skillLevel }) as { target_id: string }[]).map(
@@ -283,7 +298,13 @@ export function startStepWorker(
     const events = getEventsBySession.all({ session_id: session.id }) as ToolEvent[]
     const notes = getNotesBySession.all({ session_id: session.id }) as AssistantNote[]
     const steps = groupIntoSteps(notes, events)
-    const inProgress = session.ended_at != null || steps.length === 0 ? null : steps[steps.length - 1]
+    const lastStep = steps[steps.length - 1]
+    const completedPromptIds = new Set(
+      (getCompletedPromptIds.all({ session_id: session.id }) as { id: string }[]).map((r) => r.id)
+    )
+    const lastStepTurnCompleted = lastStep?.promptId != null && completedPromptIds.has(lastStep.promptId)
+    const inProgress =
+      session.ended_at != null || steps.length === 0 || lastStepTurnCompleted ? null : lastStep
     if (!inProgress) return { text: '', idle: true }
 
     const lastEvent = inProgress.events[inProgress.events.length - 1]

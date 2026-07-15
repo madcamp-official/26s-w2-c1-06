@@ -436,10 +436,16 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
       const sessionId = resolveLogicalSessionId(marker.sessionId, marker.ts);
       if (marker.type === 'start') {
         repo.setSessionStartedAt(sessionId, marker.ts);
-      } else {
+        emitter.emit('session-updated');
+      } else if (marker.type === 'end') {
         repo.setSessionEndedAt(sessionId, marker.ts);
+        emitter.emit('session-updated');
+      } else {
+        // Stop 훅(매 턴 종료): 에이전트 작업이 실제로 끝난 시각 — 이 세션의 미완료
+        // 프롬프트를 완료 처리해 UI의 진행중 스피너/진행바가 즉시 멈추게 한다.
+        const changed = repo.completePromptsThrough(sessionId, marker.ts);
+        if (changed > 0) emitter.emit('turn-completed');
       }
-      emitter.emit('session-updated');
     },
     (err) => emitter.emit('error', err)
   );

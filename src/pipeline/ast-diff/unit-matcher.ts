@@ -21,7 +21,15 @@ export function matchUnits(before: UnitLike[], after: UnitLike[]): UnitChange[] 
   for (const [name, afterUnit] of afterMap) {
     const beforeUnit = beforeMap.get(name);
     if (!beforeUnit) {
-      changes.push({ unitName: name, unitType: afterUnit.unitType, changeType: 'created', diffText: null });
+      // created 유닛도 diffText를 채운다(전부 '+' 라인) — 예전엔 null이라 관제실
+      // "더 자세히" 카드에서 새로 생성된 함수/컴포넌트/클래스의 실제 코드를 볼 방법이
+      // 없었다(생성이 가장 흔한 changeType인데도).
+      changes.push({
+        unitName: name,
+        unitType: afterUnit.unitType,
+        changeType: 'created',
+        diffText: makeDiffText('', afterUnit.text),
+      });
     } else if (beforeUnit.text !== afterUnit.text) {
       changes.push({
         unitName: name,
@@ -34,7 +42,13 @@ export function matchUnits(before: UnitLike[], after: UnitLike[]): UnitChange[] 
 
   for (const [name, beforeUnit] of beforeMap) {
     if (!afterMap.has(name)) {
-      changes.push({ unitName: name, unitType: beforeUnit.unitType, changeType: 'deleted', diffText: null });
+      // created와 대칭: 삭제된 코드도 전부 '-' 라인으로 남겨 무엇이 없어졌는지 볼 수 있게 한다.
+      changes.push({
+        unitName: name,
+        unitType: beforeUnit.unitType,
+        changeType: 'deleted',
+        diffText: makeDiffText(beforeUnit.text, ''),
+      });
     }
   }
 

@@ -6,7 +6,15 @@ import { buildTurnList } from '../src/app/renderer/src/components/TurnList'
 import type { Prompt, ToolEvent } from '../src/shared/types'
 
 function prompt(id: string, turnIndex: number, userText: string | null = 'test'): Prompt {
-  return { id, session_id: 's1', turn_index: turnIndex, user_text: userText, plan_text: null, created_at: null }
+  return {
+    id,
+    session_id: 's1',
+    turn_index: turnIndex,
+    user_text: userText,
+    plan_text: null,
+    created_at: null,
+    completed_at: null
+  }
 }
 
 function event(id: string, promptId: string | null): ToolEvent {

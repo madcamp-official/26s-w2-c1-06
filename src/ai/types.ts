@@ -20,6 +20,12 @@ export interface VersionCaption {
   versionId: string
   caption: string
   conceptTags: string[]
+  // 이 변경에서 AI가 "핵심"이라고 고른 부분 — 다만 AI가 코드를 다시 타이핑하는 게
+  // 아니라, diff의 실제 줄 범위를 고르면 우리가 그 줄들을 그대로 잘라 채운다
+  // (explainVersionsPrompt.ts의 줄 번호 매김 + 각 Provider의 슬라이싱 참조) — 그래서
+  // 이 필드는 항상 diff_text의 정확한 부분 문자열이고, AI가 만들어낸 텍스트가 아니다.
+  // null이면 범위를 못 골랐거나(생성 실패 등) diff 전체가 이미 핵심이라고 판단한 경우.
+  keySnippet: string | null
 }
 
 // 실시간 진행 로그(활동 탭 "바뀐 구조와 변경사항") 전용: 스텝(유휴시간/개수로 나뉜

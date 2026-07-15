@@ -168,7 +168,10 @@ function App() {
   }
 
   const currentTurn = prompts.length > 0 ? prompts[prompts.length - 1] : null
-  const currentTurnExplained = currentTurn ? explanations.has(currentTurn.id) : false
+  // Stop 훅(파이프라인)이 찍는 prompts.completed_at을 완료 판정의 근거로 쓴다 — 예전엔
+  // AI 캡션(explanations)이 생겨야만 "완료"로 봤는데, 캡션은 5초 폴링+API 호출을 거쳐
+  // 늦게 도착해서 에이전트가 실제로 멈춘 뒤에도 한참 "실행 중"으로 보이는 문제가 있었다.
+  const currentTurnCompleted = currentTurn ? currentTurn.completed_at != null : false
 
   // "현재 프롬프트" 진행바 — 에이전트 작업은 오픈엔디드라 "전체 대비 몇 %"를 미리 알
   // 방법이 없다. 대신 이 턴에서 지금까지 구조적으로 닫힌(더 이상 이벤트가 안 붙는)
@@ -176,13 +179,13 @@ function App() {
   // 들고 있어(useSteps) 이 턴 것만 걸러 쓰면 된다. 완벽한 예측은 아니지만 스텝이 실제로
   // 끝날 때마다 진짜로 전진하는 신호라, 고정 55%에 멈춰 있던 예전 방식보다는 정직하다.
   // 95%로 캡을 두는 이유: 스텝이 목표치를 넘었다고 바를 100%로 채우면 상태 텍스트는
-  // 아직 "실행 중"인데 바는 "완료"로 보이는 모순이 생긴다 — 실제 완료(currentTurnExplained)
-  // 시점에만 100%로 스냅한다.
+  // 아직 "실행 중"인데 바는 "완료"로 보이는 모순이 생긴다 — 실제 완료(currentTurnCompleted,
+  // Stop 훅 신호) 시점에만 100%로 스냅한다.
   const TURN_PROGRESS_STEP_TARGET = 8
   const currentTurnStepCount = currentTurn
     ? steps.filter((s) => s.promptId === currentTurn.id && !s.inProgress).length
     : 0
-  const currentTurnProgressPercent = currentTurnExplained
+  const currentTurnProgressPercent = currentTurnCompleted
     ? 100
     : Math.min(95, Math.round((currentTurnStepCount / TURN_PROGRESS_STEP_TARGET) * 100))
 
@@ -410,7 +413,7 @@ function App() {
                 explanations={explanations}
                 loading={loading}
                 currentTurn={currentTurn}
-                currentTurnExplained={currentTurnExplained}
+                currentTurnCompleted={currentTurnCompleted}
                 currentTurnStepCount={currentTurnStepCount}
                 currentTurnProgressPercent={currentTurnProgressPercent}
                 effectiveTurnId={effectiveTurnId}
@@ -455,7 +458,7 @@ interface ProjectPageProps {
   explanations: ReturnType<typeof useSessionTrace>['explanations']
   loading: boolean
   currentTurn: ReturnType<typeof useSessionTrace>['prompts'][number] | null
-  currentTurnExplained: boolean
+  currentTurnCompleted: boolean
   currentTurnStepCount: number
   currentTurnProgressPercent: number
   effectiveTurnId: string | null
@@ -494,7 +497,7 @@ function ProjectPage({
   explanations,
   loading,
   currentTurn,
-  currentTurnExplained,
+  currentTurnCompleted,
   currentTurnStepCount,
   currentTurnProgressPercent,
   effectiveTurnId,
@@ -635,7 +638,7 @@ function ProjectPage({
                   </span>
                   {monitoring.isMonitoring && (
                     <span className="text-[11px] font-semibold text-[#285c52]">
-                      {currentTurnExplained ? '완료' : '실행 중'}
+                      {currentTurnCompleted ? '완료' : '실행 중'}
                     </span>
                   )}
                 </div>
@@ -653,8 +656,8 @@ function ProjectPage({
                 <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
                   <span>
                     {monitoring.isMonitoring
-                      ? currentTurnExplained
-                        ? '요약 완료'
+                      ? currentTurnCompleted
+                        ? '작업 완료'
                         : `스텝 ${currentTurnStepCount}개 진행됨`
                       : '업데이트 없음'}
                   </span>
@@ -751,7 +754,6 @@ function ProjectPage({
               selectedTurnId 상태를 공유해 어느 화면에서 골라도 서로 반영된다. */}
           <PromptTimeline
             items={turnItems}
-            explanations={explanations}
             selectedTurnId={effectiveTurnId}
             onSelectTurn={onSelectTurn}
             liveStatus={liveStatus}

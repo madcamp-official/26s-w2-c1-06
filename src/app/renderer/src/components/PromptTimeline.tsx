@@ -1,12 +1,10 @@
 import { useState } from 'react'
 import { CheckCircle2, Circle, FolderKanban, Loader2, MoreHorizontal } from 'lucide-react'
-import type { AiExplanation } from '@shared/types'
 import type { LiveStatus } from '@shared/stepProgress'
 import { ORPHAN_TURN_ID, type TurnListItem } from './TurnList'
 
 interface PromptTimelineProps {
   items: TurnListItem[]
-  explanations: Map<string, AiExplanation>
   selectedTurnId: string | null
   onSelectTurn: (turnId: string) => void
   // 지금 진행 중인(마지막) 프롬프트 노드의 툴팁에 "지금 하는 중" 한 줄을 덧붙인다 —
@@ -24,7 +22,6 @@ type Segment = { key: string; kind: 'ellipsis' } | { key: string; kind: 'item'; 
 // 접어뒀던 프롬프트까지 전부 펼쳐서 같은 줄 위에서 고를 수 있게 한다.
 export function PromptTimeline({
   items,
-  explanations,
   selectedTurnId,
   onSelectTurn,
   liveStatus
@@ -57,13 +54,6 @@ export function PromptTimeline({
   const visibleItems = truncated ? items.slice(items.length - MAX_VISIBLE) : items
   const hiddenCount = items.length - visibleItems.length
 
-  const selectedItem = items.find((item) => item.turnId === selectedTurnId) ?? null
-  const selectedLabel = selectedItem
-    ? selectedItem.turnId === ORPHAN_TURN_ID
-      ? '수동으로 수정된 파일들'
-      : (selectedItem.userText ?? '연결된 요청 없음')
-    : '프롬프트를 선택하세요'
-
   const segments: Segment[] = []
   if (hiddenCount > 0) segments.push({ key: '__ellipsis__', kind: 'ellipsis' })
   for (const item of visibleItems) segments.push({ key: item.turnId, kind: 'item', item })
@@ -71,10 +61,7 @@ export function PromptTimeline({
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold tracking-[.1em] text-muted-foreground">PROMPT TIMELINE</p>
-          <h4 className="mt-0.5 truncate text-[13px] font-semibold">{selectedLabel}</h4>
-        </div>
+        <p className="text-[10px] font-semibold tracking-[.1em] text-muted-foreground">PROMPT TIMELINE</p>
         <span className="shrink-0 text-[10px] text-muted-foreground">{items.length}개 프롬프트</span>
       </div>
 
@@ -96,9 +83,6 @@ export function PromptTimeline({
                 <TimelineNode
                   item={segment.item}
                   active={segment.item.turnId === selectedTurnId}
-                  explanation={
-                    segment.item.turnId === ORPHAN_TURN_ID ? undefined : explanations.get(segment.item.turnId)
-                  }
                   liveStatus={liveStatus}
                   onSelect={() => onSelectTurn(segment.item.turnId)}
                 />
@@ -114,18 +98,19 @@ export function PromptTimeline({
 function TimelineNode({
   item,
   active,
-  explanation,
   liveStatus,
   onSelect
 }: {
   item: TurnListItem
   active: boolean
-  explanation: AiExplanation | undefined
   liveStatus: LiveStatus | undefined
   onSelect: () => void
 }) {
   const isOrphan = item.turnId === ORPHAN_TURN_ID
-  const inProgress = item.isLastTurn && !explanation && !isOrphan
+  // Stop 훅 신호(completedAt) 기준으로 진행 중 여부를 판단한다 — AI 캡션(explanation)은
+  // 완료 후 5초 폴링+API 호출을 거쳐 늦게 도착하므로, 그걸 기다리면 에이전트가 실제로
+  // 멈춘 뒤에도 한참 스피너가 계속 돈다.
+  const inProgress = item.isLastTurn && !item.completedAt && !isOrphan
   const Icon = isOrphan ? FolderKanban : inProgress ? Loader2 : CheckCircle2
   const baseLabel = isOrphan
     ? '수동으로 수정된 파일들'
