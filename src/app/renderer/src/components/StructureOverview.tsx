@@ -241,11 +241,23 @@ function computeLayeredPositions(
   const queue: string[] = units.filter((u) => incomingCount.get(u.id) === 0).map((u) => u.id)
   queue.forEach((id) => layer.set(id, 0))
 
+  // 이 루프는 "레이어 = 루트에서의 최장 경로"를 relax하며 찾는다 — DAG에서는 각 노드가
+  // 최대 |V|번만 relax되면 수렴하지만(SPFA와 동일한 성질), 실제 코드에는 상호 재귀 같은
+  // 진짜 사이클이 흔하다(예: parse_unary ↔ parse_power). 사이클이 있으면 두 노드가
+  // 서로의 레이어를 계속 밀어올리며 큐에 무한히 다시 쌓여, 결국 큐 길이가 JS 배열 최대
+  // 길이를 넘어 "Invalid array length"로 렌더러가 죽는 실제 크래시가 있었다(재현: 상호
+  // 호출하는 두 함수가 있는 프로젝트에서 구조도를 열면 바로 발생). 노드당 방문 횟수를
+  // |V|+1로 캡해서, 그 이상 relax가 필요하면 사이클로 간주하고 그 시점 레이어로 확정한다.
+  const visitCount = new Map<string, number>()
+  const maxVisitsPerNode = units.length + 1
   for (let i = 0; i < queue.length; i++) {
     const id = queue[i]
     const currentLayer = layer.get(id) ?? 0
     for (const nextId of outgoing.get(id) ?? []) {
       if (!layer.has(nextId) || (layer.get(nextId) ?? 0) < currentLayer + 1) {
+        const visits = (visitCount.get(nextId) ?? 0) + 1
+        if (visits > maxVisitsPerNode) continue
+        visitCount.set(nextId, visits)
         layer.set(nextId, currentLayer + 1)
         queue.push(nextId)
       }
