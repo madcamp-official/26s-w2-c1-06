@@ -2,7 +2,9 @@ import path from 'node:path';
 import { tailFile, type FileTailer } from './jsonl-tail.js';
 
 export interface SessionEventMarker {
-  type: 'start' | 'end';
+  // start/end = SessionStart/SessionEnd(세션 수명), turn_end = Stop(매 턴 종료 —
+  // 에이전트 작업이 실제로 끝난 시각, prompts.completed_at의 근거).
+  type: 'start' | 'end' | 'turn_end';
   sessionId: string;
   ts: string;
 }
@@ -33,7 +35,11 @@ export function tailSessionEvents(
       } catch {
         return;
       }
-      if ((obj.type === 'start' || obj.type === 'end') && obj.session_id && obj.ts) {
+      if (
+        (obj.type === 'start' || obj.type === 'end' || obj.type === 'turn_end') &&
+        obj.session_id &&
+        obj.ts
+      ) {
         onMarker({ type: obj.type, sessionId: obj.session_id, ts: obj.ts });
       }
     },

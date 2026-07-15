@@ -75,7 +75,10 @@ export class MockAIProvider implements AIProvider {
       versionId: version.id,
       caption:
         `${TONE_PREFIX[skillLevel]} ${version.unit_name} ${version.unit_type}이(가) v${version.version_no}에서 ${CHANGE_LABEL[version.change_type] ?? '변경됐어요'}.`.trim(),
-      conceptTags: [version.unit_type, version.change_type]
+      conceptTags: [version.unit_type, version.change_type],
+      // 실제 Provider처럼 AI가 "골랐다"고 가정한 앞쪽 몇 줄만 그대로 잘라 보여준다
+      // (mock도 코드를 새로 만들어내지 않는다는 원칙은 지킨다).
+      keySnippet: version.diff_text ? version.diff_text.split('\n').slice(0, 8).join('\n') : null
     }))
   }
 

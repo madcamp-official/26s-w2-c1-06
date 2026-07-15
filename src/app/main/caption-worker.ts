@@ -18,6 +18,14 @@ interface VersionCaptionRow {
   targetId: string
   caption: string
   conceptTags: string[]
+  keySnippet: string | null
+}
+
+export interface CaptionWorkerHandle {
+  stop: () => void
+  // 폴링 주기(POLL_INTERVAL_MS)를 기다리지 않고 즉시 한 번 더 시도한다 — main/index.ts가
+  // 'turn-completed'/'code-units-changed' 이벤트를 받을 때마다 호출한다.
+  triggerTick: () => void
 }
 
 // 아직 팀원의 실시간 파이프라인이 없어 tool_events는 폴링으로 들어오므로,
@@ -32,20 +40,18 @@ export function startCaptionWorker(
   db: Database.Database,
   aiProvider: AIProvider,
   onExplanationSaved?: () => void
-): () => void {
+): CaptionWorkerHandle {
   const getSkillLevel = db.prepare(`
     SELECT value FROM user_settings WHERE key = 'skill_level'
   `)
 
-  // "완료된" 턴만 후보로 삼는다: 같은 세션에 다음 턴이 이미 시작됐거나(=이 턴은 끝났다는
-  // 뜻), 세션 자체가 종료됐거나, 또는 이 턴의 마지막 활동으로부터 STEP_IDLE_GAP_MS가
-  // 지났을 때. 세 번째 조건이 필요한 이유: 사용자가 다음 프롬프트를 아직 안 쳤고
-  // 세션도(Factcoding의 "완료" 버튼을 안 눌러서) 안 끝난 채로 "그냥 작업이 끝나 있는"
-  // 상태가 실제로 흔하다 — 그동안은 앞의 두 조건만 봐서 이런 턴이 영원히 "완료" 판정을
-  // 못 받고 진행 중으로 멈춰 보였다. 스텝 경계에 이미 쓰는 것과 같은 유휴시간 기준을
-  // 재사용해 일관성을 맞춘다. 이 턴에 나중에(90초 넘게 쉬었다가) 이벤트가 더 붙으면
-  // 이미 저장된 캡션은 갱신되지 않는데 — 드문 경우이고, 없어서 영원히 안 끝나는
-  // 문제보다는 낫다고 판단했다.
+  // "완료된" 턴만 후보로 삼는다: Stop 훅이 이 턴을 완료 처리했거나(p.completed_at,
+  // 가장 직접적이고 즉각적인 신호), 같은 세션에 다음 턴이 이미 시작됐거나(=이 턴은
+  // 끝났다는 뜻), 세션 자체가 종료됐거나, 또는 이 턴의 마지막 활동으로부터
+  // STEP_IDLE_GAP_MS가 지났을 때. 뒤의 세 조건은 Stop 훅 신호가 없던(구버전 DB의
+  // 과거 데이터, 혹은 훅이 어떤 이유로 못 온 경우) 폴백으로 유지한다 — 이 턴에
+  // 나중에(90초 넘게 쉬었다가) 이벤트가 더 붙으면 이미 저장된 캡션은 갱신되지 않는데
+  // — 드문 경우이고, 없어서 영원히 안 끝나는 문제보다는 낫다고 판단했다.
   // 세션을 최신 세션 하나로 한정하지 않는다 — 과거 세션을 고정해 보거나 난이도를 바꾼
   // 경우에도 그 세션의 턴 해설이 채워져야 한다(버전 요약이 이미 전역 대상인 것과 동일).
   // 최신 세션부터 처리해 라이브 화면이 항상 먼저 채워진다.
@@ -64,7 +70,8 @@ export function startCaptionWorker(
         WHERE ae.target_type = 'prompt' AND ae.target_id = p.id AND ae.skill_level = @skill_level
       )
       AND (
-        EXISTS (SELECT 1 FROM prompts nxt WHERE nxt.session_id = p.session_id AND nxt.turn_index > p.turn_index)
+        p.completed_at IS NOT NULL
+        OR EXISTS (SELECT 1 FROM prompts nxt WHERE nxt.session_id = p.session_id AND nxt.turn_index > p.turn_index)
         OR s.ended_at IS NOT NULL
         OR COALESCE(
              (SELECT MAX(te.created_at) FROM tool_events te WHERE te.prompt_id = p.id),
@@ -93,12 +100,16 @@ export function startCaptionWorker(
     LIMIT ${BATCH_SIZE}
   `)
 
+  // key_code_snippet은 원래 step 행 전용으로 설계됐지만(schema.sql 주석 참조), code_unit_version
+  // 행에도 그대로 재사용한다 — AI가 diff에서 고른 줄 범위를 우리가 직접 잘라낸 "핵심 코드"
+  // (explainVersionsPrompt.ts의 sliceKeySnippet). prompt 행은 이 값이 없어 항상 null로 채운다.
   const upsertExplanation = db.prepare(`
-    INSERT INTO ai_explanations (id, target_type, target_id, skill_level, content, concept_tags, created_at)
-    VALUES (@id, @target_type, @target_id, @skill_level, @content, @concept_tags, @created_at)
+    INSERT INTO ai_explanations (id, target_type, target_id, skill_level, content, concept_tags, key_code_snippet, created_at)
+    VALUES (@id, @target_type, @target_id, @skill_level, @content, @concept_tags, @key_code_snippet, @created_at)
     ON CONFLICT(target_type, target_id, skill_level) DO UPDATE SET
       content = excluded.content,
       concept_tags = excluded.concept_tags,
+      key_code_snippet = excluded.key_code_snippet,
       created_at = excluded.created_at
   `)
 
@@ -111,6 +122,7 @@ export function startCaptionWorker(
         skill_level: skillLevel,
         content: caption,
         concept_tags: JSON.stringify(conceptTags),
+        key_code_snippet: null,
         created_at: new Date().toISOString()
       })
     }
@@ -125,6 +137,7 @@ export function startCaptionWorker(
         skill_level: skillLevel,
         content: row.caption,
         concept_tags: JSON.stringify(row.conceptTags),
+        key_code_snippet: row.keySnippet,
         created_at: new Date().toISOString()
       })
     }
@@ -159,7 +172,11 @@ export function startCaptionWorker(
           retryAfterByTurn.set(completedTurn.id, Date.now() + FAILURE_COOLDOWN_MS)
           throw error
         }
-        return // 틱당 provider 호출 1회 제한 (RPM 방어)
+        // 예전엔 여기서 return해 틱당 provider 호출을 1회로 제한했다(Gemini 무료 티어
+        // RPM 방어) — 그런데 턴이 잇달아 완료되면(Stop 훅이 즉시 완료 처리하므로 흔함)
+        // 매 틱이 턴 캡션만 처리하고 code_unit_version 캡션(TurnChanges "더 자세히" 카드)은
+        // 영원히 뒤로 밀려 "요약 생성 중…"이 몇 분씩 안 풀리는 문제가 있었다. 턴 하나 +
+        // 버전 배치 하나, 틱당 최대 2회 호출까지는 허용해 같은 틱에서 버전 캡션도 진행한다.
       }
 
       const pendingVersions = getUncaptionedVersions.all({
@@ -169,7 +186,12 @@ export function startCaptionWorker(
       if (pendingVersions.length > 0) {
         const captions = await aiProvider.explainUnitVersions(pendingVersions, skillLevel)
         saveVersionCaptions(
-          captions.map((c) => ({ targetId: c.versionId, caption: c.caption, conceptTags: c.conceptTags })),
+          captions.map((c) => ({
+            targetId: c.versionId,
+            caption: c.caption,
+            conceptTags: c.conceptTags,
+            keySnippet: c.keySnippet
+          })),
           skillLevel
         )
         onExplanationSaved?.()
@@ -178,11 +200,31 @@ export function startCaptionWorker(
       console.error('[caption-worker] failed to generate captions:', error)
     } finally {
       running = false
+      // triggerTick()이 이전 틱 실행 중에 들어왔으면(예: 같은 틱이 아직 provider 호출을
+      // 기다리는 사이 새 코드 유닛이 또 생김) 그 요청을 놓치지 않고 방금 끝난 직후 바로
+      // 한 번 더 돈다 — POLL_INTERVAL_MS(5초)까지 기다리지 않는다.
+      if (retriggerRequested) {
+        retriggerRequested = false
+        void tick()
+      }
     }
+  }
+
+  // 예전엔 5초 폴링만으로 새 턴 완료/코드 유닛 생성을 알아챘다 — 그 사이 최대 5초의
+  // 지연이 "요약 생성 중…"이 계속 떠 있는 것처럼 느껴지게 했다. main/index.ts가
+  // pipeline의 'turn-completed'(Stop 훅)·'code-units-changed'(AST diff 완료) 이벤트를
+  // 받을 때마다 이 함수를 호출해 폴링 주기를 기다리지 않고 즉시 한 번 더 시도한다.
+  let retriggerRequested = false
+  const triggerTick = (): void => {
+    if (running) {
+      retriggerRequested = true
+      return
+    }
+    void tick()
   }
 
   const timer = setInterval(tick, POLL_INTERVAL_MS)
   tick()
 
-  return () => clearInterval(timer)
+  return { stop: () => clearInterval(timer), triggerTick }
 }

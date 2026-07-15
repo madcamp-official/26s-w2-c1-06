@@ -51,6 +51,8 @@ function ensureHookRegistered(hooks: HooksSection, eventName: string, matcher: s
  * 아니라 매 턴 종료마다 발생하는 이벤트라 세션 종료 신호로 쓸 수 없다(Claude Code
  * 훅 문서 확인 결과). 세션이 실제로 끝나는 시점(정상 종료/Ctrl-C 등)을 안정적으로
  * 잡으려면 `SessionEnd`를 써야 한다 — 이 구현은 SessionEnd를 사용한다.
+ * `Stop`은 별도 용도로 함께 등록한다: 매 턴이 끝나는 정확한 시각을 남겨
+ * prompts.completed_at을 채우는 신호(진행중 스피너/진행바가 멈추는 시점)로 쓴다.
  */
 export function installHooks(targetProjectPath: string, hookScriptPath: string): void {
   const claudeDir = path.join(targetProjectPath, '.claude');
@@ -71,6 +73,8 @@ export function installHooks(targetProjectPath: string, hookScriptPath: string):
   ensureHookRegistered(settings.hooks, 'SessionStart', undefined, hookScriptPath);
   // SessionEnd: matcher를 빈 문자열로 두면 모든 reason(clear/resume/logout/other 등)에 매칭
   ensureHookRegistered(settings.hooks, 'SessionEnd', '', hookScriptPath);
+  // Stop: 매 턴(에이전트 응답 1회) 종료마다 발생 — prompts.completed_at의 근거.
+  ensureHookRegistered(settings.hooks, 'Stop', undefined, hookScriptPath);
 
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n', 'utf8');
 }

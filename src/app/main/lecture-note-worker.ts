@@ -16,11 +16,14 @@ const FAILURE_COOLDOWN_MS = 60_000
 const MIN_PROMPTS_FOR_NOTE = 1
 const MIN_TOOL_EVENTS_FOR_NOTE = 1
 
-// SPEC 4.3.2: Stop 훅 → 파이프라인이 sessions.ended_at 기록 → 여기서 그 전이를
-// 감지해 강의노트를 합성한다. "아직 노트가 없는, 이미 종료된 세션"을 찾는
-// 방식으로 구현해 NULL→NOT NULL 전이를 직접 추적할 필요가 없다 (lecture_notes
-// 존재 여부 자체가 "이미 처리했다"는 표식). 세션당 최초 1회만 자동 생성되고,
-// 다른 난이도로 다시 보고 싶을 때의 온디맨드 재생성은 index.ts의
+// SPEC 4.3.2 (완료 버튼 게이트로 개편): UI의 "완료" 버튼 클릭 → main이
+// sessions.completed_at 기록 → 여기서 그 전이를 감지해 강의노트를 합성한다.
+// SessionEnd 훅/앱 종료로만 끝난 세션(ended_at만 채워짐)은 사용자가 아직 그
+// 세션을 "완료"로 표시하지 않은 것일 수 있어(다른 프로젝트로 잠깐 전환 등)
+// 자동 합성 대상에서 제외한다. "아직 노트가 없는, 이미 완료 처리된 세션"을
+// 찾는 방식으로 구현해 NULL→NOT NULL 전이를 직접 추적할 필요가 없다
+// (lecture_notes 존재 여부 자체가 "이미 처리했다"는 표식). 세션당 최초 1회만
+// 자동 생성되고, 다른 난이도로 다시 보고 싶을 때의 온디맨드 재생성은 index.ts의
 // db:regenerateLectureNote IPC로 처리한다 (동일한 세션 트레이스 로더 재사용).
 // onNoteSaved: 강의노트를 저장할 때마다 호출된다 — Electron main이 이 콜백에서
 // 렌더러로 'data-changed'(kind: 'lecture-note')를 push해 다음 3초 폴링을 기다리지
@@ -30,9 +33,12 @@ export function startLectureNoteWorker(
   aiProvider: AIProvider,
   onNoteSaved?: () => void
 ): () => void {
-  const getEndedSessionsWithoutNotes = db.prepare(`
+  // completed_at은 사용자가 UI의 "완료" 버튼을 명시적으로 눌렀을 때만 기록된다
+  // (main/index.ts의 completeMonitoring) — 창을 그냥 닫거나 SessionEnd 훅만 발생한
+  // 세션은 ended_at만 채워지고 completed_at은 비어 강의노트가 자동 생성되지 않는다.
+  const getCompletedSessionsWithoutNotes = db.prepare(`
     SELECT s.* FROM sessions s
-    WHERE s.ended_at IS NOT NULL
+    WHERE s.completed_at IS NOT NULL
       AND NOT EXISTS (SELECT 1 FROM lecture_notes ln WHERE ln.session_id = s.id)
   `)
 
@@ -57,7 +63,7 @@ export function startLectureNoteWorker(
     if (running) return
     running = true
     try {
-      const endedSessions = (getEndedSessionsWithoutNotes.all() as Session[]).filter(
+      const completedSessions = (getCompletedSessionsWithoutNotes.all() as Session[]).filter(
         (s) => !insufficientSessionIds.has(s.id)
       )
 
@@ -66,7 +72,7 @@ export function startLectureNoteWorker(
 
       // 세션당 큰 컨텍스트 하나를 통째로 던지는 무거운 호출이므로, 틱당 1개만 처리.
       // 직전에 실패한 세션(쿨다운 중)은 건너뛰어 다른 세션까지 막히지 않게 한다.
-      const session = endedSessions.find((s) => (retryAfterBySession.get(s.id) ?? 0) <= Date.now())
+      const session = completedSessions.find((s) => (retryAfterBySession.get(s.id) ?? 0) <= Date.now())
       if (!session) return
 
       try {

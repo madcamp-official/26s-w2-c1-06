@@ -1,4 +1,5 @@
 import type { TranscriptEvent } from '../../shared/types.js';
+import { stripSystemContextTags } from '../../shared/format.js';
 
 // Claude Code JSONL 라인의 실제 타입 목록(2026-07 기준 관찰치).
 // 문서(SPEC 4.1)에는 user/assistant/tool_result만 언급되지만, 실물에는
@@ -82,14 +83,22 @@ function parseUserLine(obj: RawLine, sessionId: string, timestamp: string): Tran
   }
 
   // 이 라인이 tool_result만 담고 있었다면(실제 사용자 프롬프트가 아님) prompt를 만들지 않는다.
+  // 마찬가지로, 텍스트가 있어도 그게 전부 시스템이 자동으로 끼워 넣은 태그(백그라운드
+  // Bash 작업 완료 알림 등, stripSystemContextTags 참조)뿐이고 사람이 실제로 타이핑한
+  // 내용이 없으면 진짜 프롬프트가 아니다 — 그대로 턴을 만들면 관제실에 빈 "PROMPT N/N"이
+  // 계속 생겨 턴 카운트/타임라인이 오염된다(실제로 재현된 버그). DB에는 원본 그대로
+  // 저장하고(userText: rawText) — 걸러내는 판단에만 stripSystemContextTags를 쓴다.
   if (textParts.length > 0) {
-    events.push({
-      kind: 'prompt',
-      sessionId,
-      uuid: sessionId + ':' + timestamp,
-      userText: textParts.join('\n'),
-      timestamp,
-    });
+    const rawText = textParts.join('\n');
+    if (stripSystemContextTags(rawText)) {
+      events.push({
+        kind: 'prompt',
+        sessionId,
+        uuid: sessionId + ':' + timestamp,
+        userText: rawText,
+        timestamp,
+      });
+    }
   }
 
   return events;

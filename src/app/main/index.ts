@@ -22,7 +22,7 @@ import type {
   StepWithExplanation,
   ToolEvent
 } from '@shared/types'
-import { groupIntoSteps } from '@shared/steps'
+import { groupIntoSteps, STEP_IDLE_GAP_MS } from '@shared/steps'
 import type { LiveStatus } from '@shared/stepProgress'
 import { startPipeline } from '@pipeline/index'
 import { startCaptionWorker } from './caption-worker'
@@ -72,7 +72,7 @@ function broadcastDataChanged(kind: DataChangeKind): void {
 }
 
 const aiProvider = createAIProvider()
-const stopCaptionWorker = startCaptionWorker(db, aiProvider, () => broadcastDataChanged('explanation'))
+const captionWorker = startCaptionWorker(db, aiProvider, () => broadcastDataChanged('explanation'))
 const stopLectureNoteWorker = startLectureNoteWorker(db, aiProvider, () => broadcastDataChanged('lecture-note'))
 // 실시간 진행 로그(활동 탭 "바뀐 구조와 변경사항") — 턴 완료를 기다리는 caption-worker와
 // 달리 스텝(유휴시간/개수 단위) 하나가 끝날 때마다 즉시 요약한다. 스텝 요약도
@@ -226,11 +226,34 @@ function startMonitoring(projectId: string): void {
   // prompt/tool_use/tool_result 등 모든 트랜스크립트 이벤트가 prompts/tool_events를
   // 건드린다 — 렌더러의 트레이스/턴 목록이 다음 폴링을 기다리지 않고 갱신되게 push.
   pipeline.on('transcript-event', () => broadcastDataChanged('trace'))
-  pipeline.on('code-units-changed', () => broadcastDataChanged('code-units'))
+  // Stop 훅(턴 종료)으로 prompts.completed_at이 갱신됨 — 진행중 스피너/진행바가
+  // 유휴시간 추정이나 AI 요약 도착을 기다리지 않고 즉시 완료 상태로 바뀌게 push.
+  // 턴이 완료됐다는 건 caption-worker가 그 턴 캡션을 만들 수 있게 됐다는 뜻이기도 하니
+  // 5초 폴링을 기다리지 않고 바로 한 번 더 시도하게 한다("요약 생성 중…" 체감 지연 단축).
+  pipeline.on('turn-completed', () => {
+    broadcastDataChanged('trace')
+    captionWorker.triggerTick()
+  })
+  // AST diff가 code_unit_versions를 새로 커밋한 직후 — 이 유닛들의 캡션도 곧바로
+  // 시도한다(같은 이유, code-units-changed는 code_unit_version 캡션 대상이 막 생겼다는 신호).
+  pipeline.on('code-units-changed', () => {
+    broadcastDataChanged('code-units')
+    captionWorker.triggerTick()
+  })
   pipeline.on('session-updated', () => broadcastDataChanged('session'))
 }
 
-async function completeMonitoring(): Promise<void> {
+// 사용자가 UI의 "완료" 버튼을 눌렀을 때만 기록되는 세션 완료 표식 — SessionEnd 훅,
+// 앱 종료, 고아 세션 정리처럼 ended_at만 채워지는 경로와 구분된다. 강의노트 자동
+// 합성(lecture-note-worker)은 ended_at이 아니라 이 값을 게이트로 쓴다.
+const markSessionCompletedStmt = db.prepare(
+  `UPDATE sessions SET completed_at = @completed_at WHERE id = @id`
+)
+
+// userCompleted: "완료" 버튼 경로만 true — 창을 그냥 닫는 경로(window-all-closed)는
+// 관찰 종료 처리(ended_at)까지만 하고 completed_at은 남기지 않아 강의노트가 자동
+// 생성되지 않는다(사용자가 명시적으로 완료했다고 표시한 세션만 노트를 만든다).
+async function completeMonitoring(userCompleted: boolean): Promise<void> {
   if (!pipeline) return
   const stopping = pipeline
   // 핸들을 먼저 비워서, stop()이 flush를 기다리는 동안 "시작하기"를 다시 눌러도
@@ -241,6 +264,9 @@ async function completeMonitoring(): Promise<void> {
   monitoringProjectId = null
   if (sessionId) {
     stopping.markSessionEnded(sessionId)
+    if (userCompleted) {
+      markSessionCompletedStmt.run({ id: sessionId, completed_at: new Date().toISOString() })
+    }
     broadcastDataChanged('session')
   }
   // 종료 직전 Edit들의 AST diff가 DB에 기록될 때까지 기다린다 — 이걸 기다려야
@@ -308,6 +334,12 @@ const getStepExplanationsStmt = db.prepare(`
 `)
 
 const getSessionEndedAtStmt = db.prepare(`SELECT ended_at FROM sessions WHERE id = @id`)
+
+// db:getSteps의 "진행 중" 판정용 — Stop 훅으로 이미 완료 처리된 턴의 스텝은
+// 세션이 아직 안 끝났어도 진행 중으로 보지 않는다.
+const getCompletedPromptIdsStmt = db.prepare(`
+  SELECT id FROM prompts WHERE session_id = @session_id AND completed_at IS NOT NULL
+`)
 
 // 세션 재개(resume)로 발급된 논리 id들은 원본 세션의 started_at을 그대로 물려받아
 // 서로 값이 같을 수 있다(resolveLogicalSessionId 참조) — started_at만으로 정렬하면
@@ -447,11 +479,12 @@ const getCachedExplanationStmt = db.prepare(`
 `)
 
 const upsertExplanationStmt = db.prepare(`
-  INSERT INTO ai_explanations (id, target_type, target_id, skill_level, content, concept_tags, created_at)
-  VALUES (@id, @target_type, @target_id, @skill_level, @content, @concept_tags, @created_at)
+  INSERT INTO ai_explanations (id, target_type, target_id, skill_level, content, concept_tags, key_code_snippet, created_at)
+  VALUES (@id, @target_type, @target_id, @skill_level, @content, @concept_tags, @key_code_snippet, @created_at)
   ON CONFLICT(target_type, target_id, skill_level) DO UPDATE SET
     content = excluded.content,
     concept_tags = excluded.concept_tags,
+    key_code_snippet = excluded.key_code_snippet,
     created_at = excluded.created_at
 `)
 
@@ -499,7 +532,7 @@ function registerIpcHandlers(): void {
   // Promise를 그대로 반환해 renderer의 "완료" 버튼이 마지막 AST diff flush까지
   // 기다렸다가 pending을 풀게 한다 (await 없이 버리면 unhandled rejection이 되기도 함).
   ipcMain.handle('pipeline:completeMonitoring', (): Promise<void> => {
-    return completeMonitoring()
+    return completeMonitoring(true)
   })
 
   ipcMain.handle(
@@ -566,13 +599,29 @@ function registerIpcHandlers(): void {
         ])
       )
       const lastStep = steps[steps.length - 1]
+      // 마지막 스텝이라도 "진행 중"으로 보지 않는 경우: 그 스텝이 속한 턴이 Stop 훅으로
+      // 이미 완료됐거나(completed_at), 마지막 이벤트 후 스텝 유휴시간이 지났을 때 —
+      // 세션 종료만 기준으로 삼으면 에이전트가 일을 끝낸 뒤에도 계속 진행 중으로 보인다.
+      const completedPromptIds = new Set(
+        (getCompletedPromptIdsStmt.all({ session_id: sessionId }) as { id: string }[]).map((r) => r.id)
+      )
+      const lastEvent = lastStep?.events[lastStep.events.length - 1]
+      const lastEventStale = lastEvent?.created_at
+        ? Date.now() - Date.parse(lastEvent.created_at) > STEP_IDLE_GAP_MS
+        : false
+      const lastStepInProgress =
+        (session?.ended_at ?? null) === null &&
+        lastStep !== undefined &&
+        !(lastStep.promptId !== null && completedPromptIds.has(lastStep.promptId)) &&
+        !lastEventStale
 
       return steps.map((step) => ({
         stepId: step.id,
         promptId: step.promptId,
         startedAt: new Date(step.startedAt).toISOString(),
-        inProgress: (session?.ended_at ?? null) === null && step === lastStep,
-        explanation: explanationsByStepId.get(step.id) ?? null
+        inProgress: lastStepInProgress && step === lastStep,
+        explanation: explanationsByStepId.get(step.id) ?? null,
+        toolEventIds: step.events.map((e) => e.id)
       }))
     }
   )
@@ -675,7 +724,7 @@ function registerIpcHandlers(): void {
         target_id: versionId,
         skill_level: skillLevel,
         content: caption.caption,
-        key_code_snippet: null,
+        key_code_snippet: caption.keySnippet,
         key_code_lang: null,
         key_code_file: null,
         key_code_other_files: null,
@@ -771,7 +820,7 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  stopCaptionWorker()
+  captionWorker.stop()
   stopLectureNoteWorker()
   stepWorker.stop()
   void (async () => {
@@ -779,8 +828,9 @@ app.on('window-all-closed', () => {
       // "완료" 버튼을 안 누르고 창을 그냥 닫아도(Cmd+Q 등) 지금 관찰 중이던 세션을
       // ended_at 기록까지 마친 뒤 종료한다 — 안 그러면 이 세션의 마지막 턴이 다음 실행
       // 시작 때 위 고아 세션 정리 로직에 걸릴 때까지 "완료" 신호를 못 받는다.
-      // completeMonitoring이 markSessionEnded + stop(AST diff flush 대기)을 함께 처리한다.
-      await completeMonitoring()
+      // userCompleted=false: 명시적 "완료"가 아니므로 completed_at은 남기지 않는다
+      // (강의노트는 완료 버튼을 누른 세션에만 자동 생성).
+      await completeMonitoring(false)
     } catch (err) {
       console.error('[pipeline] stop failed:', err)
     }

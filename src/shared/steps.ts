@@ -8,6 +8,12 @@ import type { AssistantNote, ToolEvent } from './types'
 
 export const STEP_IDLE_GAP_MS = 90_000
 export const MAX_EVENTS_PER_STEP = 6
+// 유휴시간(90초)이나 개수(6개) cap에 걸리기 전이라도, 에이전트가 쉬지 않고 계속
+// 이것저것 빠르게 처리하면 스텝 하나가 너무 오래(몇 분씩) 안 닫혀서 실시간 진행
+// 로그 카드가 뜨문뜨문 뜨는 것처럼 느껴졌다 — 스텝 시작 후 이 시간이 지나면(그리고
+// 새 이벤트가 하나라도 더 들어오면) 무조건 닫고 새 스텝을 연다. 대략 30초에 카드
+// 하나 정도의 체감 주기를 노린 값.
+export const STEP_MAX_DURATION_MS = 30_000
 
 export interface Step {
   id: string // 그 스텝의 첫 이벤트 id. 결정론적이고 재조회해도 항상 동일.
@@ -27,10 +33,11 @@ function timeMs(iso: string | null): number {
 export function groupIntoSteps(
   notes: AssistantNote[],
   events: ToolEvent[],
-  opts: { idleGapMs?: number; maxEvents?: number } = {}
+  opts: { idleGapMs?: number; maxEvents?: number; maxDurationMs?: number } = {}
 ): Step[] {
   const idleGapMs = opts.idleGapMs ?? STEP_IDLE_GAP_MS
   const maxEvents = opts.maxEvents ?? MAX_EVENTS_PER_STEP
+  const maxDurationMs = opts.maxDurationMs ?? STEP_MAX_DURATION_MS
   const bucketKey = (promptId: string | null): string => promptId ?? '__orphan__'
 
   const eventsByBucket = new Map<string, ToolEvent[]>()
@@ -84,7 +91,11 @@ export function groupIntoSteps(
 
     for (const event of sorted) {
       const t = timeMs(event.created_at)
-      if (current.length > 0 && (t - lastEventTime > idleGapMs || current.length >= maxEvents)) {
+      const durationSoFar = current.length > 0 ? t - timeMs(current[0].created_at) : 0
+      if (
+        current.length > 0 &&
+        (t - lastEventTime > idleGapMs || current.length >= maxEvents || durationSoFar > maxDurationMs)
+      ) {
         flush()
       }
       current.push(event)

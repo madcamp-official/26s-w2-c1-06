@@ -32,7 +32,21 @@ export function formatRelativeTime(iso: string | null): string {
 // 제목/카드로 보여줄 땐 사람이 실제로 타이핑한 부분만 남기고 걷어낸다. AI 캡션 생성
 // (caption-worker)엔 원본 그대로 넘어가야 하므로 여기서 걷어내는 건 화면 표시용일 뿐,
 // DB에 저장된 원본 텍스트 자체는 건드리지 않는다.
-const SYSTEM_CONTEXT_TAG_NAMES = ['ide_opened_file', 'ide_selection', 'ide_diagnostics', 'system-reminder']
+const SYSTEM_CONTEXT_TAG_NAMES = [
+  'ide_opened_file',
+  'ide_selection',
+  'ide_diagnostics',
+  'system-reminder',
+  // 백그라운드로 돌린 Bash 작업이 끝나면 Claude Code가 다음 사용자 메시지 자리에
+  // 자동으로 끼워 넣는 알림(실제로 걸러지지 않고 그대로 노출되는 버그가 있었음) —
+  // 사람이 타이핑한 게 아니므로 다른 시스템 태그와 동일하게 취급한다.
+  'task-notification',
+  'local-command-caveat',
+  'local-command-stdout',
+  'command-name',
+  'command-message',
+  'command-args'
+]
 const SYSTEM_CONTEXT_TAG_PATTERN = new RegExp(
   `<(${SYSTEM_CONTEXT_TAG_NAMES.join('|')})>[\\s\\S]*?<\\/\\1>`,
   'g'

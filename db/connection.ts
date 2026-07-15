@@ -35,6 +35,10 @@ function applyMigrations(db: Database.Database): void {
   addColumnIfMissing(db, 'ai_explanations', 'key_code_application', 'TEXT')
   addColumnIfMissing(db, 'ai_explanations', 'error_detail', 'TEXT')
   addColumnIfMissing(db, 'ai_explanations', 'status', 'TEXT')
+  // Stop 훅 기반 턴 완료 시각(진행중 스피너/진행바 종료 신호)과, "완료" 버튼을
+  // 명시적으로 눌렀을 때만 기록되는 세션 완료 시각(강의노트 합성 게이트).
+  addColumnIfMissing(db, 'prompts', 'completed_at', 'DATETIME')
+  addColumnIfMissing(db, 'sessions', 'completed_at', 'DATETIME')
 }
 
 function addColumnIfMissing(db: Database.Database, table: string, column: string, type: string): void {

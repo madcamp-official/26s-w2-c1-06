@@ -11,6 +11,9 @@ export interface TurnListItem {
   userText: string | null
   eventCount: number
   isLastTurn: boolean
+  // Stop 훅(파이프라인)이 찍는 prompts.completed_at — null이면 이 턴은 아직 진행
+  // 중이거나 훅 신호를 못 받은 상태. ORPHAN_TURN_ID 항목은 프롬프트가 아니므로 항상 null.
+  completedAt: string | null
 }
 
 // tool_events를 프롬프트 단위로 묶어 "코딩 수정이 완료된 단위"만 뽑아낸다 — 개별
@@ -48,7 +51,8 @@ export function buildTurnList(prompts: Prompt[], events: ToolEvent[]): TurnListI
     // 있어서(캡션 생성 시엔 필요) 화면 제목으로 쓸 땐 사람이 실제로 쓴 부분만 남긴다.
     userText: stripSystemContextTags(p.user_text) || null,
     eventCount: countByPrompt.get(p.id) ?? 0,
-    isLastTurn: p.id === lastPromptId
+    isLastTurn: p.id === lastPromptId,
+    completedAt: p.completed_at
   }))
 
   if (orphanCount > 0) {
@@ -57,7 +61,8 @@ export function buildTurnList(prompts: Prompt[], events: ToolEvent[]): TurnListI
       turnIndex: null,
       userText: null,
       eventCount: orphanCount,
-      isLastTurn: false
+      isLastTurn: false,
+      completedAt: null
     })
   }
 

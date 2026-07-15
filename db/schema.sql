@@ -21,8 +21,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   project_id TEXT REFERENCES projects(id),
   project_path TEXT,
   started_at DATETIME,
-  ended_at DATETIME          -- Stop 이벤트 감지 시 파이프라인(A)이 기록.
-                             -- B는 이 값이 NULL→NOT NULL 전이를 보고 강의노트 합성 트리거.
+  ended_at DATETIME,         -- SessionEnd 훅/앱 종료/고아 세션 정리 등 "관찰이 끝났다"는 신호.
+  completed_at DATETIME      -- 사용자가 UI의 "완료" 버튼을 명시적으로 누른 시각(그 외 경로는 NULL).
+                             -- 강의노트 자동 합성은 ended_at이 아니라 이 값이 있어야만 트리거된다.
 );
 
 CREATE TABLE IF NOT EXISTS prompts (
@@ -32,7 +33,9 @@ CREATE TABLE IF NOT EXISTS prompts (
   user_text TEXT,
   plan_text TEXT,           -- 에이전트의 계획. JSONL의 TodoWrite tool_use에서 추출,
                             -- 없으면 해당 턴 첫 assistant 텍스트로 대체 (SPEC 4.1)
-  created_at DATETIME
+  created_at DATETIME,
+  completed_at DATETIME     -- Stop 훅(매 턴 종료마다 발생)이 잡은 "에이전트 작업이 끝난 시각".
+                            -- UI의 진행중 스피너/진행바, caption-worker의 턴 완료 판정이 사용.
 );
 
 CREATE TABLE IF NOT EXISTS tool_events (
@@ -108,15 +111,17 @@ CREATE TABLE IF NOT EXISTS lecture_notes (
 -- 난이도별 AI 해설 캐시 (SPEC.md 5.1)
 -- step 행(실시간 진행 로그, step-worker.ts)은 content(짧은 요약) + key_code_*
 -- (결정론적으로 뽑은 실제 diff + AI가 채운 설명/중요도/학습포인트)를 쓴다.
--- prompt/code_unit_version/qna 행은 기존 그대로 content(+ code_unit_version만 concept_tags)만 채우고
--- key_code_*/error_detail/status는 전부 null.
+-- code_unit_version 행도 key_code_snippet만 함께 채운다 — AI가 diff에 매겨진 줄 번호로
+-- "핵심 범위"를 고르면 우리가 그 줄들을 그대로 잘라 넣는다(explainVersionsPrompt.ts의
+-- sliceKeySnippet) — AI가 코드를 직접 생성하지 않으므로 항상 diff_text의 정확한 부분 문자열이다.
+-- prompt/qna 행은 기존 그대로 content(+ concept_tags)만 채우고 key_code_*/error_detail/status는 전부 null.
 CREATE TABLE IF NOT EXISTS ai_explanations (
   id TEXT PRIMARY KEY,
   target_type TEXT,         -- tool_event | prompt | code_unit_version | qna | step
   target_id TEXT,
   skill_level TEXT,         -- beginner | intermediate | advanced
   content TEXT,
-  key_code_snippet TEXT,    -- 핵심 코드 스니펫(nullable) — 결정론적으로 추출된 실제 diff, AI가 만들지 않음. step 행 전용.
+  key_code_snippet TEXT,    -- 핵심 코드 스니펫(nullable) — 결정론적으로 추출된 실제 diff, AI가 만들지 않음. step/code_unit_version 행에서 사용.
   key_code_lang TEXT,       -- 코드 언어(ts, tsx 등). step 행 전용.
   key_code_file TEXT,       -- 코드가 위치한 파일 경로. step 행 전용.
   key_code_other_files TEXT,     -- 같은 스텝에서 함께 바뀐 나머지 파일 목록(JSON 배열). step 행 전용.
