@@ -76,6 +76,35 @@ export class Repo {
     return result.changes;
   }
 
+  // Stop 훅 폴백: Claude Code는 훅 설정을 CLI 세션 시작 시점에 한 번만 읽으므로, 사용자가
+  // "시작하기"를 누르기 전부터 이미 열려있던 세션은 installHooks가 나중에 settings.json을
+  // 갱신해도 그 세션엔 절대 적용되지 않는다 — Stop 훅이 영원히 안 와서 completed_at이
+  // 안 채워지고, UI의 진행중 스피너가 코드 작업이 끝난 뒤에도 영원히 안 멈추는 실제 버그였다.
+  // caption-worker.ts의 getNextCompletedTurn과 같은 "완료로 볼 조건"(다음 턴 시작/세션 종료/
+  // 유휴시간 초과)이지만, 그쪽은 캡션 생성 후보 선정에만 쓰고 completed_at 자체는 안 건드려서
+  // 이 문제를 못 풀었다 — 여기서는 실제로 컬럼을 채워 turn-completed 이벤트가 걸리게 한다.
+  completeIdlePrompts(idleCutoffIso: string): number {
+    const result = this.db
+      .prepare(
+        `UPDATE prompts
+         SET completed_at = COALESCE(
+           (SELECT MAX(te.created_at) FROM tool_events te WHERE te.prompt_id = prompts.id),
+           prompts.created_at
+         )
+         WHERE completed_at IS NULL
+           AND (
+             EXISTS (SELECT 1 FROM prompts nxt WHERE nxt.session_id = prompts.session_id AND nxt.turn_index > prompts.turn_index)
+             OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = prompts.session_id AND s.ended_at IS NOT NULL)
+             OR COALESCE(
+                  (SELECT MAX(te.created_at) FROM tool_events te WHERE te.prompt_id = prompts.id),
+                  prompts.created_at
+                ) <= @idleCutoff
+           )`
+      )
+      .run({ idleCutoff: idleCutoffIso });
+    return result.changes;
+  }
+
   // --- tool_events --------------------------------------------------------
   insertToolEvent(params: {
     id: string;

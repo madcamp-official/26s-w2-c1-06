@@ -16,6 +16,7 @@ import { matchUnits, type UnitChange } from './ast-diff/unit-matcher.js';
 import { extractEdges, type EdgeCandidate } from './ast-diff/edge-extractor.js';
 import { configureCtags, isCtagsCandidate, extractWithCtags } from './ast-diff/ctags-extractor.js';
 import { computeUnitId } from './ast-diff/unit-id.js';
+import { STEP_IDLE_GAP_MS } from '../shared/steps.js';
 import type { PipelineConfig, PipelineHandle, TranscriptEvent } from '../shared/types.js';
 
 const SESSION_FILE_POLL_MS = 2000;
@@ -25,6 +26,9 @@ const AST_DIFF_DEBOUNCE_MS = 500;
 // chokidar가 에이전트 자신의 Edit/Write로 인한 디스크 변화까지 "수동 수정"으로 잡지 않도록
 // 직전에 에이전트가 같은 파일을 건드렸으면 이 시간 동안은 manual-watch 콜백을 무시한다.
 const MANUAL_EDIT_DEDUP_WINDOW_MS = 2000;
+// Stop 훅 폴백 체크 주기. STEP_IDLE_GAP_MS(90초) 자체보다 훨씬 촘촘하게 돌아야
+// "유휴 90초 경과"를 실제로 체감 지연 없이 잡아낸다.
+const IDLE_COMPLETION_CHECK_MS = 10_000;
 
 interface EditInput {
   file_path: string;
@@ -306,6 +310,15 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
         if (event.toolName === 'Read' && event.filePath) {
           snapshotCache.seedFromDisk(event.filePath);
         }
+        // Edit/Write는 tool_result(성공 확인)를 기다리지 않고 지금 바로 dedup 타임스탬프를
+        // 남긴다. 실제 디스크 쓰기는 이 tool_use 로그 다음에 일어나므로, 여기서 찍어두면
+        // manual-watch의 chokidar가 그 디스크 변화를 감지하는 시점(awaitWriteFinish
+        // stabilityThreshold 300ms 포함)보다 반드시 먼저다 — tool_result 시점까지 기다리면
+        // (우리 자신의 JSONL tail 폴링 지연 때문에) chokidar가 먼저 감지해버려 매 agent
+        // Edit/Write가 "수동 수정"으로 중복 기록되는 레이스가 실제로 있었다.
+        if ((event.toolName === 'Edit' || event.toolName === 'Write') && event.filePath) {
+          lastAgentEditAtByFile.set(event.filePath, Date.now());
+        }
         break;
       }
 
@@ -384,7 +397,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
   let currentTailer: FileTailer | null = null;
   let stopped = false;
 
-  function attachTo(filePath: string) {
+  function attachTo(filePath: string, skipExisting: boolean) {
     currentTailer?.stop();
     currentFile = filePath;
     currentTailer = tailFile(
@@ -398,7 +411,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
           });
         }
       },
-      { startAtEnd: config.startAtEnd, onError: (err) => emitter.emit('error', err) }
+      { startAtEnd: skipExisting, onError: (err) => emitter.emit('error', err) }
     );
     emitter.emit('session-file-changed', filePath);
   }
@@ -409,7 +422,15 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
     try {
       const latest = findLatestSessionFile(projectDir);
       if (latest && latest !== currentFile) {
-        attachTo(latest);
+        // 여기서 새로 발견되는 세션 파일은 관찰이 이미 시작된 뒤에 생긴 파일이다 — 그 안의
+        // 모든 내용(첫 프롬프트 포함)이 관찰 대상이어야 하므로 절대 skipExisting을 켜면 안
+        // 된다. 예전엔 이 경로도 config.startAtEnd(true)를 그대로 물려받아서, checkForNewerSession의
+        // 2초 폴링 지연 동안 세션이 이미 첫 프롬프트+tool_use 몇 개를 다 써버린 뒤에야 우리가
+        // attach하면 그 시점의 파일 크기를 "이미 지나간 내용"으로 착각해 스킵해버렸다 — 실제로
+        // 겪은 버그: 첫 prompt 이벤트만 유실되고(prompt_id가 영영 안 잡힘) 그 프롬프트의
+        // tool_use/tool_result는 이미 파일에 남아있던 나머지가 새로 도착하는 것처럼 잡혀
+        // orphan(수동 수정 취급)으로 떨어졌다.
+        attachTo(latest, false);
       }
     } catch (err) {
       emitter.emit('error', err);
@@ -420,10 +441,26 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
   // 'session-file-changed'가 startPipeline()이 핸들을 반환하기도 전에 동기적으로 emit돼,
   // 호출자가 handle.on('session-file-changed', ...)을 붙이기 전에 첫 이벤트를 놓친다
   // (실제로 겪은 버그: Electron main이 그 이벤트로 현재 session id를 추적하는데 항상 null이었음).
+  // 이 최초 파일은 관찰을 켜기 *이전부터* 있던 세션일 수 있으므로(사용자가 "시작하기"를
+  // 누르기 전부터 대화 중이었을 경우), 그 경우에 한해 config.startAtEnd로 과거 내용을 스킵한다.
   const initial = findLatestSessionFile(projectDir);
-  if (initial) setImmediate(() => attachTo(initial));
+  if (initial) setImmediate(() => attachTo(initial, config.startAtEnd ?? false));
 
   const sessionCheckTimer = setInterval(checkForNewerSession, SESSION_FILE_POLL_MS);
+
+  // Stop 훅 폴백(repo.completeIdlePrompts 주석 참조): 훅이 이 세션에 적용 안 됐을 수 있으므로
+  // 주기적으로 "완료로 볼 조건"을 직접 확인해 completed_at을 채운다. Stop 훅이 정상적으로 온
+  // 세션은 이미 completed_at이 채워져 있어 여기서 매치되는 행이 없으므로 중복 처리 걱정은 없다.
+  function checkIdleCompletion() {
+    try {
+      const idleCutoff = new Date(Date.now() - STEP_IDLE_GAP_MS).toISOString();
+      const changed = repo.completeIdlePrompts(idleCutoff);
+      if (changed > 0) emitter.emit('turn-completed');
+    } catch (err) {
+      emitter.emit('error', err);
+    }
+  }
+  const idleCompletionTimer = setInterval(checkIdleCompletion, IDLE_COMPLETION_CHECK_MS);
 
   // SessionStart/SessionEnd 훅이 남기는 마커 tail. sessions.started_at/ended_at을
   // 훅이 주는 권위 있는 시각으로 기록한다(ended_at은 Person B의 강의노트 합성 트리거 신호).
@@ -499,6 +536,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
       sessionEventsTailer.stop();
       manualWatcher.stop();
       clearInterval(sessionCheckTimer);
+      clearInterval(idleCompletionTimer);
       // 대기 중인 디바운스 diff는 버리지 않고 즉시 플러시해 큐에 넣는다 — 예전엔 타이머만
       // 취소해서 종료 직전 500ms 이내의 마지막 Edit 배치가 유실됐다(알려진 한계였음).
       for (const filePath of [...pendingDiffByFile.keys()]) {
