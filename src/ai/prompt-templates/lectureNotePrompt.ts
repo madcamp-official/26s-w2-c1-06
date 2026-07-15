@@ -25,7 +25,8 @@ export function buildLectureNotePrompt(trace: SessionTrace, skillLevel: SkillLev
   return [
     'You are writing a end-of-session Markdown lecture note for a learner who just watched an AI coding agent work, so they can review what happened later.',
     SKILL_TONE_INSTRUCTIONS[skillLevel],
-    '다음 섹션을 포함하는 한국어 Markdown 문서를 작성해줘: "## 다룬 개념", "## 변경된 코드 유닛별 요약", "## 다음 학습 추천".',
+    '문서의 맨 첫 줄은 이 세션에서 무엇을 했는지 한눈에 드러나는 구체적인 한 줄 제목으로 시작해줘("# 제목" 형식, 예: "# 피보나치 수열 구현 및 모듈화"). "세션 요약"이나 "다룬 개념" 같은 일반적인 문구만으로 된 제목은 쓰지 마 — 노트 목록에서 이 제목만 보고 어떤 세션이었는지 구분할 수 있어야 한다.',
+    '그 다음에 아래 섹션들을 포함하는 한국어 Markdown 문서를 작성해줘: "## 다룬 개념", "## 변경된 코드 유닛별 요약", "## 다음 학습 추천".',
     '결과는 Markdown 텍스트 자체만 출력해줘 — ```markdown 이나 ``` 같은 코드 펜스로 전체를 감싸지 마.',
     '세션에서 사용자가 요청한 턴들:',
     turnLines || '(없음)',

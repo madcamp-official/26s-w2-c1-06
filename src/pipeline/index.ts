@@ -24,7 +24,11 @@ const SESSION_FILE_POLL_MS = 2000;
 const AST_DIFF_DEBOUNCE_MS = 500;
 // chokidar가 에이전트 자신의 Edit/Write로 인한 디스크 변화까지 "수동 수정"으로 잡지 않도록
 // 직전에 에이전트가 같은 파일을 건드렸으면 이 시간 동안은 manual-watch 콜백을 무시한다.
-const MANUAL_EDIT_DEDUP_WINDOW_MS = 2000;
+// manual-watch의 DEDUP_RECHECK_DELAY_MS(3초 유예 후 재확인)보다 반드시 커야 한다 —
+// 재확인 시점엔 타임스탬프가 찍힌 지 이미 유예만큼 지났으므로, 윈도가 유예보다 짧으면
+// 재확인이 항상 "윈도 지남"으로 판정해 유예 자체가 무의미해진다(chokidar 안정화 지연과
+// 세션 감지 폴링 편차까지 감안해 여유 있게 잡음).
+const MANUAL_EDIT_DEDUP_WINDOW_MS = 8000;
 // Stop 훅 폴백(completeIdlePrompts)이 "유휴"로 볼 시간. caption-worker.ts의
 // STEP_IDLE_GAP_MS(90초, 강의노트용 스텝 묶기 기준)와는 목적이 달라 일부러 분리한다 —
 // 그쪽은 백그라운드 캡션 생성이라 늦어도 체감이 없지만, 이건 사용자가 보고 있는 로딩
@@ -329,6 +333,22 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
         // Edit/Write가 "수동 수정"으로 중복 기록되는 레이스가 실제로 있었다.
         if ((event.toolName === 'Edit' || event.toolName === 'Write') && event.filePath) {
           lastAgentEditAtByFile.set(event.filePath, Date.now());
+          // 위 dedup은 "앞으로 올" chokidar 이벤트만 막는다 — 새 세션 파일 감지가 2초
+          // 폴링이라, 세션 시작 직후의 Write들은 우리가 이 줄을 읽기 전에 chokidar가
+          // 먼저 "수동 수정"으로 확정해버릴 수 있다(실제로 첫 프롬프트의 유닛들이 고아
+          // 수동 이벤트에 붙어 그 프롬프트의 구조도에서 빠지던 버그). 이미 기록돼버린
+          // 중복 수동 이벤트를 여기서 회수한다(버전 재귀속 + 수동 이벤트 삭제).
+          const adopted = repo.adoptOrphanManualToolEvents(event.filePath, event.toolUseId, event.timestamp, promptId);
+          if (adopted.length > 0) {
+            // 회수된 수동 이벤트의 AST diff가 아직 디바운스 대기 중이면, 그대로 두면
+            // 이미 삭제된 tool_event id로 버전을 쓰려다 FK 위반으로 실패한다 — 대기
+            // 항목을 에이전트 이벤트 소속으로 바꿔치기한다(before/타이머는 그대로).
+            const pending = pendingDiffByFile.get(event.filePath);
+            if (pending && adopted.includes(pending.toolEventId)) {
+              pending.toolEventId = event.toolUseId;
+              pending.promptId = promptId;
+            }
+          }
         }
         break;
       }

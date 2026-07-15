@@ -62,6 +62,60 @@ db.prepare(
   `UPDATE sessions SET ended_at = @ended_at WHERE ended_at IS NULL`
 ).run({ ended_at: new Date().toISOString() })
 
+// 에이전트 자신의 Edit/Write가 파일 감시(chokidar)에 먼저 잡혀 "수동 수정"으로 중복
+// 기록되던 레이스가 과거에 남긴 고아 이벤트 정리 — 지금은 파이프라인이 tool_use를 읽는
+// 시점에 실시간으로 회수하지만(repo.adoptOrphanManualToolEvents), 그 수정 전에 이미
+// 기록돼버린 데이터는 DB에 그대로 남아 "수동으로 수정된 파일들" 그룹과 해당 프롬프트의
+// 구조도를 계속 오염시킨다. 판별 기준은 실시간 회수와 동일: 같은 파일에 대한 에이전트
+// Edit/Write와 시간적으로 거의 겹치는(-2초~+10초) 고아 수동 이벤트는 중복으로 보고,
+// 그 버전들을 에이전트 이벤트/프롬프트로 재귀속한 뒤 수동 이벤트를 지운다. 멱등이라
+// 앱을 켤 때마다 돌려도 안전하다(정리 후엔 매칭되는 행이 없음).
+const orphanManualDupes = db
+  .prepare(
+    `SELECT m.id AS manualId, a.id AS agentId, a.prompt_id AS promptId
+     FROM tool_events m
+     JOIN tool_events a
+       ON a.file_path = m.file_path
+      AND a.source = 'agent'
+      AND a.tool_name IN ('Edit', 'Write')
+      AND julianday(m.created_at) >= julianday(a.created_at) - 2.0 / 86400.0
+      AND julianday(m.created_at) <= julianday(a.created_at) + 10.0 / 86400.0
+     WHERE m.source = 'manual' AND m.prompt_id IS NULL
+     GROUP BY m.id`
+  )
+  .all() as Array<{ manualId: string; agentId: string; promptId: string | null }>
+if (orphanManualDupes.length > 0) {
+  const reparentVersionsStmt = db.prepare(
+    `UPDATE code_unit_versions SET tool_event_id = @agentId, prompt_id = @promptId WHERE tool_event_id = @manualId`
+  )
+  const deleteManualEventStmt = db.prepare(`DELETE FROM tool_events WHERE id = @manualId`)
+  db.transaction(() => {
+    for (const dupe of orphanManualDupes) {
+      reparentVersionsStmt.run(dupe)
+      deleteManualEventStmt.run({ manualId: dupe.manualId })
+    }
+  })()
+  console.log(`[cleanup] 에이전트 작업이 "수동 수정"으로 중복 기록된 고아 이벤트 ${orphanManualDupes.length}건 회수`)
+}
+
+// 우리 앱 자신이 "시작하기" 때 대상 프로젝트의 .claude/settings.json에 훅을 설치하면서
+// 남긴 자기 오염도 정리한다 — manual-watch가 이제 .claude/를 감시에서 제외하므로 새로
+// 생기진 않지만, 과거에 기록된 행은 "수동으로 수정된 파일들" 그룹에 계속 남는다.
+// (.claude 안의 파일은 코드 유닛을 만들지 않아 버전 재귀속은 필요 없다 — 그래도 만일을
+// 대비해 버전부터 지운다.)
+const selfPollutionCleanup = db.transaction(() => {
+  db.prepare(
+    `DELETE FROM code_unit_versions WHERE tool_event_id IN (
+       SELECT id FROM tool_events WHERE source = 'manual' AND file_path LIKE '%/.claude/%'
+     )`
+  ).run()
+  return db.prepare(`DELETE FROM tool_events WHERE source = 'manual' AND file_path LIKE '%/.claude/%'`).run().changes
+})
+const removedSelfPollution = selfPollutionCleanup()
+if (removedSelfPollution > 0) {
+  console.log(`[cleanup] 훅 설치가 남긴 .claude/ 수동 수정 기록 ${removedSelfPollution}건 정리`)
+}
+
 // SPEC 4.6 "파이프라인 이벤트 → IPC push": main이 DB를 갱신할 때마다 렌더러로
 // 'data-changed'를 push해 폴링 주기를 기다리지 않고 즉시 재조회하게 한다. 같은
 // kind가 짧은 시간에 여러 번 발생해도(예: 빠른 연속 tool_use) IPC를 한 번만 보내도록

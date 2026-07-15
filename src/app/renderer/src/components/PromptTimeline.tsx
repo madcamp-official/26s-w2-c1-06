@@ -20,6 +20,10 @@ type Segment = { key: string; kind: 'ellipsis' } | { key: string; kind: 'item'; 
 // 노드로 늘어놓고(왼쪽=과거 → 오른쪽=최신) 클릭해서 고르게 한다. 세션이 길어져
 // 노드가 너무 많아지면 앞쪽(오래된) 것들을 "…" 노드 하나로 접어두고, 그 "…"를 클릭하면
 // 접어뒀던 프롬프트까지 전부 펼쳐서 같은 줄 위에서 고를 수 있게 한다.
+// "수동으로 수정된 파일들"(ORPHAN) 노드는 시간 순서를 갖는 프롬프트가 아니므로
+// (buildTurnList가 목록 끝에 붙여주지만) 타임라인 맨 왼쪽에 별개 노드로 떼어 두고,
+// 프롬프트 시퀀스와는 점선으로만 잇는다 — 실선 흐름(과거→최신)에 끼어 있으면
+// "몇 번째 프롬프트"처럼 읽히는 문제가 있었다.
 export function PromptTimeline({
   items,
   selectedTurnId,
@@ -27,6 +31,9 @@ export function PromptTimeline({
   liveStatus
 }: PromptTimelineProps) {
   const [expanded, setExpanded] = useState(false)
+
+  const orphanItem = items.find((item) => item.turnId === ORPHAN_TURN_ID) ?? null
+  const promptItems = items.filter((item) => item.turnId !== ORPHAN_TURN_ID)
 
   if (items.length === 0) {
     // 빈 상태에서도 헤더("PROMPT TIMELINE")와 타임라인 선 자리는 그대로 남겨서, 아래
@@ -50,9 +57,11 @@ export function PromptTimeline({
     )
   }
 
-  const truncated = !expanded && items.length > MAX_VISIBLE
-  const visibleItems = truncated ? items.slice(items.length - MAX_VISIBLE) : items
-  const hiddenCount = items.length - visibleItems.length
+  // "…" 접기/펼치기는 프롬프트 노드에만 적용한다 — 수동 수정 노드는 개수와 무관하게
+  // 항상 왼쪽에 그대로 보인다.
+  const truncated = !expanded && promptItems.length > MAX_VISIBLE
+  const visibleItems = truncated ? promptItems.slice(promptItems.length - MAX_VISIBLE) : promptItems
+  const hiddenCount = promptItems.length - visibleItems.length
 
   const segments: Segment[] = []
   if (hiddenCount > 0) segments.push({ key: '__ellipsis__', kind: 'ellipsis' })
@@ -62,11 +71,24 @@ export function PromptTimeline({
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="mb-3 flex items-center justify-between gap-3">
         <p className="text-[10px] font-semibold tracking-[.1em] text-muted-foreground">PROMPT TIMELINE</p>
-        <span className="shrink-0 text-[10px] text-muted-foreground">{items.length}개 프롬프트</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">{promptItems.length}개 프롬프트</span>
       </div>
 
       <div className="overflow-x-auto pb-1">
         <div className="flex min-w-max items-center">
+          {orphanItem && (
+            <div className="flex shrink-0 items-center">
+              <TimelineNode
+                item={orphanItem}
+                active={orphanItem.turnId === selectedTurnId}
+                liveStatus={liveStatus}
+                onSelect={() => onSelectTurn(orphanItem.turnId)}
+              />
+              {segments.length > 0 && (
+                <span className="w-6 shrink-0 border-t border-dashed border-[#c7c6bd]" />
+              )}
+            </div>
+          )}
           {segments.map((segment, index) => (
             <div key={segment.key} className="flex shrink-0 items-center">
               {index > 0 && <span className="h-px w-6 shrink-0 bg-border" />}
@@ -134,7 +156,10 @@ function TimelineNode({
       className={`grid size-7 shrink-0 place-items-center rounded-full border-2 transition ${
         active
           ? 'border-[#285c52] bg-[#e4f0eb] text-[#245248]'
-          : 'border-transparent bg-[#eef5f2] text-[#3c7c6d] hover:border-[#b8d9ce]'
+          : isOrphan
+            ? // 프롬프트 시퀀스와 별개인 노드임이 색으로도 드러나게 초록 대신 중립 톤을 쓴다.
+              'border-transparent bg-[#f1f0eb] text-[#8a8b83] hover:border-[#cfcfc7]'
+            : 'border-transparent bg-[#eef5f2] text-[#3c7c6d] hover:border-[#b8d9ce]'
       }`}
     >
       <Icon size={13} className={inProgress ? 'animate-spin' : undefined} />

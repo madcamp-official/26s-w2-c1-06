@@ -6,7 +6,10 @@ export interface ManualWatcher {
 
 export type ManualFsEventKind = 'add' | 'change' | 'unlink';
 
-const IGNORED_PATTERNS = [/node_modules/, /\.git(\/|\\|$)/, /\.factcoding(\/|\\)/, /\.db(-wal|-shm|-journal)?$/];
+// .claude: 관찰 시작 시 우리 훅 설치기(hook-installer.ts)가 대상 프로젝트의
+// .claude/settings.json을 직접 쓰므로, 감시에 포함하면 "시작하기"를 누를 때마다
+// 우리 자신의 쓰기가 "수동 수정"으로 기록되는 자기 오염이 생긴다(실제 DB에서 확인).
+const IGNORED_PATTERNS = [/node_modules/, /\.git(\/|\\|$)/, /\.factcoding(\/|\\)/, /\.claude(\/|\\|$)/, /\.db(-wal|-shm|-journal)?$/];
 
 function isIgnoredPath(filePath: string): boolean {
   return IGNORED_PATTERNS.some((re) => re.test(filePath));
@@ -25,8 +28,12 @@ const BURST_THRESHOLD = 6;
 // pollInterval 100ms 뒤에 이 이벤트를 발생시킨다. 두 폴링 주기가 비슷해 어느 쪽이
 // 먼저 끝나는지가 매번 다르고, 실제로 에이전트 Write 336~421ms 뒤에 chokidar가 먼저
 // 도착해 dedup이 무력화되는 사례가 재현됐다(prompt_id 없는 "수동 수정"으로 오기록).
-// 최종 판정 전에 우리 폴링 주기보다 넉넉한 유예를 두고 한 번 더 확인해 이 레이스를 없앤다.
-const DEDUP_RECHECK_DELAY_MS = 600;
+// 최종 판정 전에 유예를 두고 한 번 더 확인해 이 레이스를 없앤다. 유예 길이는 tail
+// 폴링(300ms)만이 아니라 "새 세션 파일 감지" 폴링(checkForNewerSession, 2초)까지
+// 덮어야 한다 — 세션 시작 직후의 Write들은 세션 파일 자체가 아직 attach 안 된 상태라
+// 최대 2초+α 뒤에야 tool_use가 읽히는데, 600ms 유예로는 이 창을 못 덮어서 첫
+// 프롬프트의 에이전트 산출물이 "수동 수정"으로 오기록되는 버그가 실제로 있었다.
+const DEDUP_RECHECK_DELAY_MS = 3000;
 
 /**
  * 에이전트가 아닌 수동 파일 생성/수정/삭제를 chokidar로 감지한다 (SPEC 4.1 fallback).

@@ -165,6 +165,45 @@ export class Repo {
       .run(params);
   }
 
+  // 에이전트 자신의 Edit/Write가 파일 감시(chokidar)에 먼저 잡혀 "수동 수정"으로 중복
+  // 기록되는 레이스의 사후 회수 경로: 같은 파일에 대한 에이전트 Edit/Write tool_use를
+  // 관찰한 시점에, 그 이벤트의 실제 발생 시각과 거의 겹치는(아래 윈도) 고아 수동
+  // 이벤트가 이미 DB에 있으면 에이전트 이벤트의 것으로 재귀속한다 — 수동 이벤트가 먼저
+  // diff를 소비해버리면 코드 유닛 버전들이 prompt_id 없는 고아에 붙어서, 그 프롬프트의
+  // "바뀐 구조와 변경사항" 구조도에서 해당 유닛들이 통째로 빠지는 실제 버그가 있었다.
+  // 버전 행들을 에이전트 이벤트/프롬프트로 옮긴 뒤 수동 이벤트 자체는 지운다(중복이므로).
+  // 윈도: 수동 이벤트 created_at은 chokidar 감지+유예를 거친 시각이라 실제 쓰기(에이전트
+  // 이벤트 timestamp)보다 몇 초 늦다 — 앞 -2초는 시계 오차 버퍼, 뒤 +10초는 감지 지연
+  // 상한(안정화 300ms + 재확인 유예 + awaitWriteFinish 재시작 여유). 진짜 수동 편집이
+  // 에이전트 편집 후 10초 안에 같은 파일에서 일어나면 오귀속될 수 있지만, 에이전트가
+  // 작업 중인 파일을 사람이 그 몇 초 사이에 직접 고치는 경우는 현실적으로 드물고,
+  // 반대 방향(에이전트 작업이 수동으로 오기록)의 피해가 훨씬 크다고 판단했다.
+  adoptOrphanManualToolEvents(filePath: string, agentToolEventId: string, agentTimestampIso: string, promptId: string | null): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id FROM tool_events
+         WHERE source = 'manual' AND prompt_id IS NULL AND file_path = @filePath
+           AND julianday(created_at) >= julianday(@agentTs) - 2.0 / 86400.0
+           AND julianday(created_at) <= julianday(@agentTs) + 10.0 / 86400.0`
+      )
+      .all({ filePath, agentTs: agentTimestampIso }) as Array<{ id: string }>;
+    if (rows.length === 0) return [];
+
+    const reparentVersions = this.db.prepare(
+      `UPDATE code_unit_versions SET tool_event_id = @agentId, prompt_id = @promptId WHERE tool_event_id = @manualId`
+    );
+    const deleteManualEvent = this.db.prepare(`DELETE FROM tool_events WHERE id = @manualId`);
+    const adopt = this.db.transaction((manualIds: string[]) => {
+      for (const manualId of manualIds) {
+        reparentVersions.run({ agentId: agentToolEventId, promptId, manualId });
+        deleteManualEvent.run({ manualId });
+      }
+    });
+    const ids = rows.map((r) => r.id);
+    adopt(ids);
+    return ids;
+  }
+
   // resultContent: tool_result의 텍스트화된 내용(성공 출력/에러 메시지, truncate됨) —
   // 실시간 진행 로그(step-worker.ts)가 실패 이유를 보여줄 근거. 없으면(추출 실패 등) null.
   updateToolEventResult(

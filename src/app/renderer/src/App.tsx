@@ -37,13 +37,16 @@ import type { OnboardingProfile, Project, SkillLevel } from '@shared/types'
 import { formatRelativeTime, stripMarkdownFence, stripSystemContextTags } from '@shared/format'
 import { SKILL_LEVEL_LABEL } from '@shared/skillProfile'
 
-type ViewKey = 'projects' | 'project'
-type ProjectTab = 'overview' | 'activity' | 'notes'
+// 'notes'는 프로젝트 안의 탭이 아니라 최상위 뷰다 — 강의노트가 프로젝트 단위로 스코프되지
+// 않고(useLectureNotes가 전 프로젝트 목록을 반환) 모든 프로젝트의 노트를 한 화면에서
+// 프로젝트 필터로 골라 보는 화면이라, 특정 프로젝트를 골라야 진입되는 ProjectPage 아래에
+// 두면 "프로젝트를 먼저 고르세요" 안내에 막히는 모순이 있었다.
+type ViewKey = 'projects' | 'project' | 'notes'
+type ProjectTab = 'overview' | 'activity'
 
 const TABS: Array<{ key: ProjectTab; label: string }> = [
   { key: 'overview', label: '개요' },
-  { key: 'activity', label: '활동' },
-  { key: 'notes', label: '노트' }
+  { key: 'activity', label: '활동' }
 ]
 
 // 사이드바/프로젝트 헤더의 아바타 색은 데모처럼 프로젝트마다 고정 팔레트에서 하나씩
@@ -75,11 +78,39 @@ function pathLeaf(path: string): string {
   return parts[parts.length - 1] || trimmed
 }
 
+// 강의노트 프롬프트가 요구하는 고정 섹션 제목들 — 문서에 진짜 제목이 없으면 첫 줄이
+// 이 섹션 헤더라서, 예전엔 모든 노트 카드 제목이 "다룬 개념"으로 찍히는 문제가 있었다.
+const GENERIC_NOTE_HEADINGS = new Set(['다룬 개념', '변경된 코드 유닛별 요약', '다음 학습 추천', '세션 요약', '학습 노트'])
+
+// 제목으로 쓸 한 줄에서 리스트 마커/강조 기호를 걷어낸다 — 제목 자리가 없는 노트에서
+// 본문 첫 줄(불릿일 수 있음)을 대신 쓸 때 "- **트레이드오프:** …"처럼 원문 마크업이
+// 그대로 노출되지 않게.
+function cleanNoteTitleLine(line: string): string {
+  return line
+    .replace(/^[-*+]\s+/, '')
+    .replace(/^\d+\.\s+/, '')
+    .replace(/[*_`]/g, '')
+    .trim()
+    .slice(0, 44)
+}
+
 function noteTitle(markdown: string): string {
-  const line = stripMarkdownFence(markdown)
-    .split('\n')
-    .find((l) => l.trim().length > 0) ?? '학습 노트'
-  return line.replace(/^#+\s*/, '').slice(0, 44)
+  let firstBodyLine: string | null = null
+  for (const raw of stripMarkdownFence(markdown).split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    const headingMatch = line.match(/^#{1,6}\s+(.*)$/)
+    if (headingMatch) {
+      const heading = headingMatch[1].trim()
+      // 고정 섹션 헤더("다룬 개념" 등)는 제목이 아니다 — 건너뛰고 계속 찾는다.
+      if (!GENERIC_NOTE_HEADINGS.has(heading)) return cleanNoteTitleLine(heading)
+      continue
+    }
+    // 헤딩이 아닌 첫 본문 줄은 "진짜 제목 헤딩이 뒤에 없을 때"의 폴백으로 기억해둔다
+    // (예: 인트로 문장으로 시작하는 노트 — 그 문장이 섹션명보다 훨씬 나은 제목이다).
+    if (firstBodyLine === null) firstBodyLine = line
+  }
+  return firstBodyLine ? cleanNoteTitleLine(firstBodyLine) : '학습 노트'
 }
 
 // 관제실/구조도/강의노트는 project_id로 스코프되므로, 프로젝트를 고르거나 새로
@@ -154,6 +185,24 @@ function App() {
   // 그래서 세션 id만 기억해두고 노트 유무는 렌더링 시점에 매번 다시 확인한다.
   const [justCompletedSessionId, setJustCompletedSessionId] = useState<string | null>(null)
 
+  // 학습 노트 뷰의 프로젝트 필터 — null이면 전체 프로젝트의 노트를 다 보여준다.
+  const [notesProjectFilter, setNotesProjectFilter] = useState<string | null>(null)
+  // 필터 칩은 등록된 프로젝트 목록이 아니라 실제로 노트가 있는 프로젝트에서만 만든다 —
+  // 노트가 하나도 없는 프로젝트의 칩을 눌러 빈 화면을 보게 할 이유가 없다.
+  const noteProjects = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const note of notes) {
+      if (note.project_id && !seen.has(note.project_id)) {
+        seen.set(note.project_id, note.project_name ?? '이름 없는 프로젝트')
+      }
+    }
+    return Array.from(seen, ([id, name]) => ({ id, name }))
+  }, [notes])
+  const filteredNotes = useMemo(
+    () => (notesProjectFilter ? notes.filter((n) => n.project_id === notesProjectFilter) : notes),
+    [notes, notesProjectFilter]
+  )
+
   const goToProjects = (): void => setView('projects')
   const selectProject = (projectId: string): void => {
     setCurrentProjectId(projectId)
@@ -164,20 +213,24 @@ function App() {
     setSideOpen(false)
   }
 
-  // "완료" 버튼("오늘은 여기까지"): 관찰을 끝내는 것에 더해, 자동으로 노트 탭으로
-  // 넘겨서 방금 끝난 이 세션의 요약을 바로 보여준다.
+  // "완료" 버튼("오늘은 여기까지"): 관찰을 끝내는 것에 더해, 자동으로 학습 노트 뷰로
+  // 넘겨서 방금 끝난 이 세션의 요약을 바로 보여준다. 프로젝트 필터가 다른 프로젝트로
+  // 걸려 있으면 방금 끝난 세션의 노트가 안 보이므로 전체 보기로 리셋한다.
   const completeSessionAndShowSummary = async (): Promise<void> => {
     const completedSessionId = monitoring.sessionId
     await monitoring.complete()
     if (completedSessionId) setJustCompletedSessionId(completedSessionId)
-    setActiveTab('notes')
+    setNotesProjectFilter(null)
+    setView('notes')
   }
 
-  // "계속하기": 노트 요약을 보다가 이어서 같은 프로젝트를 다시 관찰하고 싶을 때.
+  // "계속하기": 노트 요약을 보다가 이어서 같은 프로젝트를 다시 관찰하고 싶을 때 —
+  // 노트 뷰에서 그 프로젝트의 활동 탭으로 돌아간다(currentProjectId는 그대로 남아있음).
   // 강조 배너는 새 세션이 시작되면 더 이상 "방금 끝난 세션"이 아니므로 지운다.
   const continueMonitoring = async (): Promise<void> => {
     setJustCompletedSessionId(null)
     await monitoring.start()
+    setView('project')
     setActiveTab('activity')
   }
 
@@ -280,9 +333,17 @@ function App() {
       .slice(0, 4)
   }, [events])
 
+  // 개요 탭 "도움이 될 만한 내용"은 지금 보고 있는 프로젝트의 노트만 보여준다 —
+  // useLectureNotes가 전 프로젝트 통합 목록을 반환하게 바뀐 뒤(학습 노트 뷰용),
+  // 여기서 필터 없이 최신순만 자르면 어느 프로젝트를 열어도 똑같은 카드가 떠서
+  // "현재 작업과 연결해 읽어보세요"라는 문구와 안 맞는 회귀가 있었다.
   const recentNotes = useMemo(
-    () => [...notes].sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')).slice(0, 3),
-    [notes]
+    () =>
+      notes
+        .filter((note) => note.project_id === currentProjectId)
+        .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''))
+        .slice(0, 3),
+    [notes, currentProjectId]
   )
 
   const monitoringDisabled =
@@ -411,12 +472,11 @@ function App() {
             <button
               type="button"
               onClick={() => {
-                setView('project')
-                setActiveTab('notes')
+                setView('notes')
                 setSideOpen(false)
               }}
               className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] transition ${
-                view === 'project' && activeTab === 'notes'
+                view === 'notes'
                   ? 'bg-[#eaf4ef] font-medium text-[#285c52]'
                   : 'text-[#686b64] hover:bg-[#f1f0eb]'
               }`}
@@ -462,6 +522,52 @@ function App() {
             </div>
           )}
 
+          {view === 'notes' && (
+            <div>
+              <div className="mb-6">
+                <h1 className="text-[22px] font-semibold tracking-[-.03em]">학습 노트</h1>
+                <p className="mt-1 text-[13px] text-muted-foreground">
+                  모든 프로젝트에서 만들어진 강의노트를 한곳에서 볼 수 있어요.
+                </p>
+              </div>
+              {noteProjects.length > 0 && (
+                <div className="mb-5 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNotesProjectFilter(null)}
+                    className={`rounded-full px-3.5 py-1.5 text-[12px] font-medium transition ${
+                      notesProjectFilter === null
+                        ? 'bg-[#285c52] text-white'
+                        : 'border border-border bg-white text-[#686b64] hover:bg-[#f1f0eb]'
+                    }`}
+                  >
+                    전체
+                  </button>
+                  {noteProjects.map((project) => (
+                    <button
+                      key={project.id}
+                      type="button"
+                      onClick={() => setNotesProjectFilter(project.id)}
+                      className={`rounded-full px-3.5 py-1.5 text-[12px] font-medium transition ${
+                        notesProjectFilter === project.id
+                          ? 'bg-[#285c52] text-white'
+                          : 'border border-border bg-white text-[#686b64] hover:bg-[#f1f0eb]'
+                      }`}
+                    >
+                      {project.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <LectureNotesViewer
+                notes={filteredNotes}
+                justCompletedSessionId={justCompletedSessionId}
+                onContinue={continueMonitoring}
+                continuePending={monitoring.pending}
+              />
+            </div>
+          )}
+
           {view === 'project' &&
             (!currentProject ? (
               <NoProjectPrompt onGoToProjects={goToProjects} />
@@ -474,8 +580,7 @@ function App() {
                 monitoringDisabled={monitoringDisabled}
                 monitoringDisabledReason={monitoringDisabledReason}
                 onCompleteSession={completeSessionAndShowSummary}
-                justCompletedSessionId={justCompletedSessionId}
-                onContinueMonitoring={continueMonitoring}
+                onOpenNotes={() => setView('notes')}
                 onDeleteProject={deleteCurrentProject}
                 deletingProject={deletingProject}
                 deleteProjectDisabled={isMonitoringCurrentProject}
@@ -500,7 +605,6 @@ function App() {
                 steps={steps}
                 liveStatus={liveStatus}
                 filesTouched={filesTouched}
-                notes={notes}
                 recentNotes={recentNotes}
                 qna={qna}
                 qnaOpen={qnaOpen}
@@ -521,8 +625,9 @@ interface ProjectPageProps {
   monitoringDisabled: boolean
   monitoringDisabledReason: string | undefined
   onCompleteSession: () => Promise<void>
-  justCompletedSessionId: string | null
-  onContinueMonitoring: () => Promise<void>
+  // 개요 탭 "도움이 될 만한 내용"의 노트 카드를 눌렀을 때 — 노트는 프로젝트 탭이 아니라
+  // 최상위 학습 노트 뷰에 있으므로 App의 setView로 넘어가야 한다.
+  onOpenNotes: () => void
   onDeleteProject: () => void
   deletingProject: boolean
   deleteProjectDisabled: boolean
@@ -547,7 +652,6 @@ interface ProjectPageProps {
   steps: ReturnType<typeof useSteps>
   liveStatus: ReturnType<typeof useLiveStatus>
   filesTouched: Array<[string, number]>
-  notes: ReturnType<typeof useLectureNotes>['notes']
   recentNotes: ReturnType<typeof useLectureNotes>['notes']
   qna: ReturnType<typeof useQna>
   qnaOpen: boolean
@@ -562,8 +666,7 @@ function ProjectPage({
   monitoringDisabled,
   monitoringDisabledReason,
   onCompleteSession,
-  justCompletedSessionId,
-  onContinueMonitoring,
+  onOpenNotes,
   onDeleteProject,
   deletingProject,
   deleteProjectDisabled,
@@ -588,7 +691,6 @@ function ProjectPage({
   steps,
   liveStatus,
   filesTouched,
-  notes,
   recentNotes,
   qna,
   qnaOpen,
@@ -757,7 +859,7 @@ function ProjectPage({
                     <button
                       key={note.id}
                       type="button"
-                      onClick={() => onTabChange('notes')}
+                      onClick={onOpenNotes}
                       className="w-full rounded-xl border border-border bg-card p-3.5 text-left transition hover:border-[#bfd8ce] hover:shadow-sm"
                     >
                       <div className="mb-2 flex justify-between">
@@ -883,15 +985,6 @@ function ProjectPage({
             </div>
           </section>
         </div>
-      )}
-
-      {activeTab === 'notes' && (
-        <LectureNotesViewer
-          notes={notes}
-          justCompletedSessionId={justCompletedSessionId}
-          onContinue={onContinueMonitoring}
-          continuePending={monitoring.pending}
-        />
       )}
     </>
   )
