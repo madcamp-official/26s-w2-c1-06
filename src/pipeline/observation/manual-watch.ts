@@ -19,6 +19,15 @@ function isIgnoredPath(filePath: string): boolean {
 const BURST_WINDOW_MS = 1000;
 const BURST_THRESHOLD = 6;
 
+// shouldIgnore(dedup)는 pipeline/index.ts가 tool_use 시점에 찍어두는 타임스탬프를 본다.
+// 그런데 그 타임스탬프는 우리 자신의 JSONL tail이 그 줄을 읽어야 찍히고, 그 tail은
+// 300ms 폴링이다(jsonl-tail.ts) — 반면 chokidar는 stabilityThreshold 300ms + 자체
+// pollInterval 100ms 뒤에 이 이벤트를 발생시킨다. 두 폴링 주기가 비슷해 어느 쪽이
+// 먼저 끝나는지가 매번 다르고, 실제로 에이전트 Write 336~421ms 뒤에 chokidar가 먼저
+// 도착해 dedup이 무력화되는 사례가 재현됐다(prompt_id 없는 "수동 수정"으로 오기록).
+// 최종 판정 전에 우리 폴링 주기보다 넉넉한 유예를 두고 한 번 더 확인해 이 레이스를 없앤다.
+const DEDUP_RECHECK_DELAY_MS = 600;
+
 /**
  * 에이전트가 아닌 수동 파일 생성/수정/삭제를 chokidar로 감지한다 (SPEC 4.1 fallback).
  * `shouldIgnore(filePath)`가 true면(직전에 에이전트가 같은 파일을 건드렸으면) 무시 —
@@ -60,16 +69,22 @@ export function watchManualEdits(
   }
 
   function handle(kind: ManualFsEventKind, filePath: string): void {
-    if (shouldIgnore(filePath)) return;
+    if (shouldIgnore(filePath)) return; // 이미 dedup 타임스탬프가 있으면 유예 없이 바로 스킵
+    // 버스트 판정(isBulkOperation)은 실제 fs 이벤트 도착 시점 기준으로 즉시 계산해야
+    // git checkout 같은 진짜 동시다발 변경을 정확히 잡는다 — 아래 유예는 "에이전트가
+    // 방금 건드린 파일인지" 재확인용이지, 버스트 판단용이 아니다.
     const isBulk = isBulkOperation();
-    // onManualEdit은 DB 기록 등 실패할 수 있는 작업을 하므로, 예외가 나도 워처 자체는
-    // 계속 살아있어야 한다(다음 파일 변경을 계속 감지해야 함).
-    try {
-      onManualEdit(filePath, kind, isBulk);
-    } catch (err) {
-      if (onError) onError(err);
-      else console.error('[manual-watch] onManualEdit 처리 중 예외:', err);
-    }
+    setTimeout(() => {
+      if (shouldIgnore(filePath)) return; // 유예 동안 agent dedup 타임스탬프가 찍혔으면 취소
+      // onManualEdit은 DB 기록 등 실패할 수 있는 작업을 하므로, 예외가 나도 워처 자체는
+      // 계속 살아있어야 한다(다음 파일 변경을 계속 감지해야 함).
+      try {
+        onManualEdit(filePath, kind, isBulk);
+      } catch (err) {
+        if (onError) onError(err);
+        else console.error('[manual-watch] onManualEdit 처리 중 예외:', err);
+      }
+    }, DEDUP_RECHECK_DELAY_MS);
   }
 
   watcher.on('add', (filePath) => handle('add', filePath));

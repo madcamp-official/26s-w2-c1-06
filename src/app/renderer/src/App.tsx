@@ -595,7 +595,7 @@ function ProjectPage({
                   edges={timeline.edges}
                   selectedUnitId={timeline.selectedUnitId}
                   onSelectUnit={timeline.selectUnit}
-                  heightClassName="h-[220px]"
+                  heightClassName="h-[420px]"
                 />
               </div>
             </section>
@@ -715,6 +715,9 @@ function ProjectPage({
       {activeTab === 'activity' && (
         <div className="space-y-6">
           <div>
+            {/* 이 배지 줄은 "지금 실제로 살아있는" 세션 상태(현재 프롬프트/진행 상황)를
+                보여주는 자리 — 아래 큰 제목은 타임라인에서 고른 프롬프트를 보여주므로
+                (선택 안 했으면 기본으로 최신 턴), 라이브 상태는 여기로 분리해뒀다. */}
             <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold tracking-[0.08em] text-[#3c7566]">
               <span
                 className={`inline-block size-1.5 rounded-full ${
@@ -722,11 +725,19 @@ function ProjectPage({
                 }`}
               />
               {monitoring.isMonitoring ? 'LIVE SESSION' : '관찰 꺼짐'}
-              {currentTurn && (
+              {selectedTurnItem && selectedTurnItem.turnIndex !== null && (
                 <>
                   <span className="text-[#c7c6bd]">·</span>
                   <span>
-                    PROMPT {currentTurn.turn_index + 1} / {prompts.length}
+                    PROMPT {selectedTurnItem.turnIndex + 1} / {prompts.length}
+                  </span>
+                </>
+              )}
+              {monitoring.isMonitoring && currentTurn && (
+                <>
+                  <span className="text-[#c7c6bd]">·</span>
+                  <span className="max-w-[260px] truncate font-mono text-[10px] font-normal tracking-normal text-[#6d7069]">
+                    현재: {stripSystemContextTags(currentTurn.user_text) || '대기 중'}
                   </span>
                 </>
               )}
@@ -740,10 +751,13 @@ function ProjectPage({
               )}
             </div>
             <h2 className="max-w-[900px] text-[22px] font-semibold leading-tight tracking-[-0.03em] sm:text-[25px]">
-              {stripSystemContextTags(currentTurn?.user_text ?? null) ||
-                (monitoring.isMonitoring
+              {selectedTurnItem
+                ? selectedTurnItem.turnId === ORPHAN_TURN_ID
+                  ? '수동으로 수정된 파일들'
+                  : selectedTurnItem.userText || '(내용 없음)'
+                : monitoring.isMonitoring
                   ? '에이전트의 첫 작업을 기다리고 있어요'
-                  : '헤더 옆 "시작하기"를 누르면 관찰이 시작돼요')}
+                  : '헤더 옆 "시작하기"를 누르면 관찰이 시작돼요'}
             </h2>
           </div>
 

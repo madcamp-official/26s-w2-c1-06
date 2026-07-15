@@ -83,6 +83,10 @@ export class Repo {
   // caption-worker.ts의 getNextCompletedTurn과 같은 "완료로 볼 조건"(다음 턴 시작/세션 종료/
   // 유휴시간 초과)이지만, 그쪽은 캡션 생성 후보 선정에만 쓰고 completed_at 자체는 안 건드려서
   // 이 문제를 못 풀었다 — 여기서는 실제로 컬럼을 채워 turn-completed 이벤트가 걸리게 한다.
+  // 유휴시간 조건에만(다음 턴 시작/세션 종료는 그 자체로 확실한 신호라 예외) pending
+  // tool_event가 없어야 한다는 조건을 추가로 건다 — tool_events.created_at은 도구를
+  // "호출한" 시각이라 tool_result 완료 시각을 반영하지 못하므로, 이 가드가 없으면 빌드/
+  // 테스트처럼 오래 걸리는 도구가 아직 실행 중인데도 유휴로 오판해 "완료"로 잘못 찍을 수 있다.
   completeIdlePrompts(idleCutoffIso: string): number {
     const result = this.db
       .prepare(
@@ -95,14 +99,31 @@ export class Repo {
            AND (
              EXISTS (SELECT 1 FROM prompts nxt WHERE nxt.session_id = prompts.session_id AND nxt.turn_index > prompts.turn_index)
              OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = prompts.session_id AND s.ended_at IS NOT NULL)
-             OR COALESCE(
-                  (SELECT MAX(te.created_at) FROM tool_events te WHERE te.prompt_id = prompts.id),
-                  prompts.created_at
-                ) <= @idleCutoff
+             OR (
+                  COALESCE(
+                    (SELECT MAX(te.created_at) FROM tool_events te WHERE te.prompt_id = prompts.id),
+                    prompts.created_at
+                  ) <= @idleCutoff
+                  AND NOT EXISTS (
+                    SELECT 1 FROM tool_events te WHERE te.prompt_id = prompts.id AND te.status = 'pending'
+                  )
+                )
            )`
       )
       .run({ idleCutoff: idleCutoffIso });
     return result.changes;
+  }
+
+  // completeIdlePrompts는 어디까지나 추측(유휴시간)이라 틀릴 수 있다 — 유휴 판정 이후에도
+  // 에이전트가 실제로는 아직 살아있어서 새 tool_use가 들어오면, 잘못 찍은 완료를 되돌려
+  // UI 스피너가 다시 진행중으로 돌아가게 한다. 실제 Stop 훅으로 완료된 턴엔 그 다음부터
+  // 새 tool_use가 절대 오지 않으므로(다음 사용자 턴은 새 prompt_id를 받음) 이 호출 자체가
+  // 실질적으로 fallback 오판이 있었던 경우에만 일어난다.
+  reopenPrompt(promptId: string): boolean {
+    const result = this.db
+      .prepare(`UPDATE prompts SET completed_at = NULL WHERE id = @promptId AND completed_at IS NOT NULL`)
+      .run({ promptId });
+    return result.changes > 0;
   }
 
   // --- tool_events --------------------------------------------------------

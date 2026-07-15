@@ -16,7 +16,6 @@ import { matchUnits, type UnitChange } from './ast-diff/unit-matcher.js';
 import { extractEdges, type EdgeCandidate } from './ast-diff/edge-extractor.js';
 import { configureCtags, isCtagsCandidate, extractWithCtags } from './ast-diff/ctags-extractor.js';
 import { computeUnitId } from './ast-diff/unit-id.js';
-import { STEP_IDLE_GAP_MS } from '../shared/steps.js';
 import type { PipelineConfig, PipelineHandle, TranscriptEvent } from '../shared/types.js';
 
 const SESSION_FILE_POLL_MS = 2000;
@@ -26,9 +25,16 @@ const AST_DIFF_DEBOUNCE_MS = 500;
 // chokidar가 에이전트 자신의 Edit/Write로 인한 디스크 변화까지 "수동 수정"으로 잡지 않도록
 // 직전에 에이전트가 같은 파일을 건드렸으면 이 시간 동안은 manual-watch 콜백을 무시한다.
 const MANUAL_EDIT_DEDUP_WINDOW_MS = 2000;
-// Stop 훅 폴백 체크 주기. STEP_IDLE_GAP_MS(90초) 자체보다 훨씬 촘촘하게 돌아야
-// "유휴 90초 경과"를 실제로 체감 지연 없이 잡아낸다.
-const IDLE_COMPLETION_CHECK_MS = 10_000;
+// Stop 훅 폴백(completeIdlePrompts)이 "유휴"로 볼 시간. caption-worker.ts의
+// STEP_IDLE_GAP_MS(90초, 강의노트용 스텝 묶기 기준)와는 목적이 달라 일부러 분리한다 —
+// 그쪽은 백그라운드 캡션 생성이라 늦어도 체감이 없지만, 이건 사용자가 보고 있는 로딩
+// 스피너라 90초는 너무 길다. repo.completeIdlePrompts의 pending tool_event 가드 덕분에
+// 오래 걸리는 도구 실행 중엔 절대 오판하지 않고, 설령 판단이 틀려도(에이전트가 실제로는
+// 계속 생각 중이었던 경우) 새 tool_use가 오는 순간 reopenPrompt로 즉시 되돌리므로 짧게
+// 잡아도 안전하다.
+const FALLBACK_IDLE_GAP_MS = 20_000;
+// 위 유휴 임계값을 체감 지연 없이 잡아내기 위한 체크 주기.
+const IDLE_COMPLETION_CHECK_MS = 5_000;
 
 interface EditInput {
   file_path: string;
@@ -296,6 +302,11 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
 
       case 'tool_use': {
         const promptId = currentPromptIdBySession.get(sessionId) ?? null;
+        // completeIdlePrompts 폴백이 유휴로 오판해 이 프롬프트를 이미 "완료"로 찍었을 수
+        // 있다 — 그런데 지금 새 tool_use가 왔다는 건 에이전트가 실제로는 계속 작업 중이었다는
+        // 뜻이므로, 완료 표시를 되돌린다. 이 이벤트 자체가 이미 'transcript-event'로
+        // broadcastDataChanged('trace')를 걸어 렌더러가 다시 조회하므로 별도 emit은 불필요.
+        if (promptId) repo.reopenPrompt(promptId);
         repo.insertToolEvent({
           id: event.toolUseId,
           sessionId,
@@ -453,7 +464,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
   // 세션은 이미 completed_at이 채워져 있어 여기서 매치되는 행이 없으므로 중복 처리 걱정은 없다.
   function checkIdleCompletion() {
     try {
-      const idleCutoff = new Date(Date.now() - STEP_IDLE_GAP_MS).toISOString();
+      const idleCutoff = new Date(Date.now() - FALLBACK_IDLE_GAP_MS).toISOString();
       const changed = repo.completeIdlePrompts(idleCutoff);
       if (changed > 0) emitter.emit('turn-completed');
     } catch (err) {
