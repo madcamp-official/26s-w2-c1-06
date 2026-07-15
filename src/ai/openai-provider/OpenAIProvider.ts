@@ -11,6 +11,7 @@ import type {
   VersionCaption
 } from '../types'
 import { buildAnswerQuestionPrompt } from '../prompt-templates/answerQuestionPrompt'
+import { buildExtractPlanPrompt } from '../prompt-templates/extractPlanPrompt'
 import { buildExplainTurnPrompt } from '../prompt-templates/explainTurnPrompt'
 import { buildExplainVersionsPrompt, sliceKeySnippet } from '../prompt-templates/explainVersionsPrompt'
 import { buildLectureNotePrompt } from '../prompt-templates/lectureNotePrompt'
@@ -156,6 +157,11 @@ export class OpenAIProvider implements AIProvider {
 
   async answerQuestion(question: string, context: ContextBundle, skillLevel: SkillLevel): Promise<string> {
     const prompt = buildAnswerQuestionPrompt(question, context, skillLevel)
+    return (await this.generateText(prompt)) ?? ''
+  }
+
+  async extractPlan(userRequest: string, intentText: string): Promise<string> {
+    const prompt = buildExtractPlanPrompt(userRequest, intentText)
     return (await this.generateText(prompt)) ?? ''
   }
 

@@ -12,6 +12,7 @@ import type {
 } from '../types'
 import type { GeminiKeyPool } from '../key-pool/GeminiKeyPool'
 import { buildAnswerQuestionPrompt } from '../prompt-templates/answerQuestionPrompt'
+import { buildExtractPlanPrompt } from '../prompt-templates/extractPlanPrompt'
 import { buildExplainTurnPrompt, EXPLAIN_TURN_RESPONSE_SCHEMA } from '../prompt-templates/explainTurnPrompt'
 import {
   buildExplainVersionsPrompt,
@@ -152,6 +153,11 @@ export class GeminiProvider implements AIProvider {
 
   async answerQuestion(question: string, context: ContextBundle, skillLevel: SkillLevel): Promise<string> {
     const prompt = buildAnswerQuestionPrompt(question, context, skillLevel)
+    return (await this.generateText(prompt)) ?? ''
+  }
+
+  async extractPlan(userRequest: string, intentText: string): Promise<string> {
+    const prompt = buildExtractPlanPrompt(userRequest, intentText)
     return (await this.generateText(prompt)) ?? ''
   }
 

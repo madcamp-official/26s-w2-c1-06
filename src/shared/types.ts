@@ -72,6 +72,9 @@ export interface Prompt {
   turn_index: number
   user_text: string | null
   plan_text: string | null
+  // TodoWrite 없이 남은 첫 assistant 텍스트(의도 선언문) — plan-worker가 아직 plan_text로
+  // 정리하지 못한 동안만 채워져 있다. UI는 이 값이 있고 plan_text가 없으면 "계획 정리 중" 상태로 본다.
+  pending_plan_source_text: string | null
   created_at: string | null
   // Stop 훅(매 턴 종료마다 발생)이 잡은 "에이전트 작업이 끝난 시각". NULL이면 아직
   // 진행 중이거나 훅 신호를 못 받은 턴 — UI 스피너/진행바와 caption-worker가 사용.
@@ -148,6 +151,12 @@ export interface LectureNote {
   markdown: string
   skill_level: SkillLevel
   created_at: string | null
+  // 노트 패널이 모든 프로젝트의 강의노트를 한 목록으로 보여주므로(db:getLectureNotes),
+  // 어느 프로젝트에서 나온 노트인지 표시할 때 쓴다. 세션 하나로 노트를 즉석 재생성하는
+  // db:regenerateLectureNote 응답에는 없다(그 자리에서 project join을 안 하므로) — UI는
+  // 항상 db:getLectureNotes로 다시 불러온 목록을 그리므로 실제로는 항상 채워져 있다.
+  project_id?: string
+  project_name?: string
 }
 
 export interface AiExplanation {

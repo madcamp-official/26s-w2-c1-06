@@ -56,8 +56,27 @@ export class Repo {
       .run(params);
   }
 
+  // 화면에 보여줄 실제(완성된) 계획을 확정한다 — TodoWrite 경로가 직접 호출한다.
+  // 뒤늦게 도착할 수 있는 plan-worker의 AI 변환 결과가 이미 확정된 이 값을 덮어쓰지
+  // 않도록 pending_plan_source_text도 함께 비운다(Repo.stagePendingPlanSourceText 참조).
   updatePromptPlanText(promptId: string, planText: string): void {
-    this.db.prepare(`UPDATE prompts SET plan_text = @planText WHERE id = @promptId`).run({ promptId, planText });
+    this.db
+      .prepare(
+        `UPDATE prompts SET plan_text = @planText, pending_plan_source_text = NULL WHERE id = @promptId`
+      )
+      .run({ promptId, planText });
+  }
+
+  // TodoWrite 없이 남은 턴의 첫 assistant 텍스트(의도 선언문)를 곧장 "계획"으로 쓰지
+  // 않고 일단 대기시킨다 — plan-worker(caption-worker.ts)가 이걸 실제 단계별 계획으로
+  // 정리한 뒤에야 plan_text가 채워진다. TodoWrite가 이미 도착해 plan_text가 차 있으면
+  // 건드리지 않는다(TodoWrite가 항상 우선).
+  stagePendingPlanSourceText(promptId: string, text: string): void {
+    this.db
+      .prepare(
+        `UPDATE prompts SET pending_plan_source_text = @text WHERE id = @promptId AND plan_text IS NULL`
+      )
+      .run({ promptId, text });
   }
 
   // Stop 훅(턴 종료) 마커 수신 시: 이 세션에서 마커 시각 이전에 시작됐고 아직 완료

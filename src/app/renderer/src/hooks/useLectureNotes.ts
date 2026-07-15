@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { LectureNote, SkillLevel } from '@shared/types'
 import { useDataChanged } from './useDataChanged'
 
@@ -11,22 +11,15 @@ interface UseLectureNotesResult {
 }
 
 // SPEC 4.3.2/4.5: 세션 종료 후 자동 합성되는 강의노트 목록 + "다른 난이도로
-// 다시 보기" 온디맨드 재생성(뷰어에서 요청). 세션이 안 끝났으면 계속 빈
-// 배열 — Stop 훅 감지 전까지는 정상 상태. projectId가 없으면 조회하지 않는다.
-export function useLectureNotes(projectId: string | null): UseLectureNotesResult {
+// 다시 보기" 온디맨드 재생성(뷰어에서 요청). 노트 패널은 특정 프로젝트로 스코프하지
+// 않고 모든 프로젝트의 강의노트를 하나의 누적 목록으로 보여준다(project_id 인자 없음).
+export function useLectureNotes(): UseLectureNotesResult {
   const [notes, setNotes] = useState<LectureNote[]>([])
-  const latestProjectRef = useRef<string | null>(null)
 
   const fetchNotes = useCallback(async (): Promise<void> => {
-    if (!projectId) {
-      setNotes([])
-      return
-    }
-    latestProjectRef.current = projectId
-    const rows = await window.factcoding.getLectureNotes(projectId)
-    if (latestProjectRef.current !== projectId) return // 그 사이 다른 프로젝트로 전환됨 — 버림
+    const rows = await window.factcoding.getLectureNotes()
     setNotes(rows)
-  }, [projectId])
+  }, [])
 
   useEffect(() => {
     fetchNotes()

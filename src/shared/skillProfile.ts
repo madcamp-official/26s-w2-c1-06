@@ -21,20 +21,19 @@ export const SKILL_LEVEL_LABEL: Record<SkillLevel, string> = {
 // 정확한 필수/선택 구분은 개정 연도마다 조금씩 달라질 수 있어, 여기 없는 과목은
 // "직접 추가"로 보충하는 걸 전제로 한다 — 공식 수강 감사가 아니라 난이도 추정용 자기 신고.
 export const KAIST_REQUIRED_COURSES = [
-  '이산구조',
   '프로그래밍의 기초',
-  '프로그래밍의 원리',
-  '자료구조',
-  '소프트웨어개발의 원리와 실습',
-  '알고리즘',
+  '이산구조',
+  '프로그래밍언어',
+  '데이터구조',
+  '알고리즘개론',
   '운영체제',
-  '컴퓨터네트워크',
+  '전산망개론',
   '데이터베이스'
 ] as const
 
 // 사용자가 명시적으로 지정한 "메인 선택 가능 옵션" — 시스템 이해도를 크게 끌어올리는
 // 과목이라 전공필수보다 가중치를 높게 준다 (computeSkillProfile 참조).
-export const KAIST_HIGHLIGHTED_ELECTIVES = ['전산기구조', '시스템 프로그래밍'] as const
+export const KAIST_HIGHLIGHTED_ELECTIVES = ['전산기조직', '시스템 프로그래밍'] as const
 
 export const PROJECT_COUNT_OPTIONS: Array<{ value: ProjectCountBucket; label: string }> = [
   { value: '0', label: '아직 없어요' },

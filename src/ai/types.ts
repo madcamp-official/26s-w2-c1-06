@@ -86,5 +86,9 @@ export interface AIProvider {
   ): Promise<VersionCaption[]>
   synthesizeLectureNote(trace: SessionTrace, skillLevel: SkillLevel): Promise<string>
   answerQuestion(question: string, context: ContextBundle, skillLevel: SkillLevel): Promise<string>
+  // "이번 프롬프트의 계획" 카드 전용: TodoWrite 없이 남은 에이전트의 첫 텍스트(의도
+  // 선언문)를 실제 단계별 계획(마크다운 불릿 목록)으로 재구성한다. plan-worker(
+  // caption-worker.ts)가 prompts.pending_plan_source_text가 채워진 턴마다 호출한다.
+  extractPlan(userRequest: string, intentText: string): Promise<string>
 }
 

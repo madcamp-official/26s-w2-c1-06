@@ -128,7 +128,7 @@ function App() {
   // 스텝 단위로 채워진다. liveStatus는 "지금 하는 중" 한 줄, DB 폴링보다 훨씬 빠르다.
   const steps = useSteps(sessionId, skillLevel)
   const liveStatus = useLiveStatus()
-  const { notes } = useLectureNotes(currentProjectId)
+  const { notes } = useLectureNotes()
   const { needsOnboarding, complete } = useOnboarding(setSkillLevel)
   // 사이드바 "설정"에서 온보딩 위저드를 다시 열어 난이도를 조정할 때 — 온보딩 최초
   // 완료 때와 동일하게 난이도를 적용하고 원본 프로필을 저장해, 다음에 또 열면 방금
