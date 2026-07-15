@@ -411,6 +411,15 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
   function attachTo(filePath: string, skipExisting: boolean) {
     currentTailer?.stop();
     currentFile = filePath;
+    // startAtEnd(관찰 시작 이전 내용은 스킵)는 이 파이프라인 인스턴스의 "첫 attach"에만
+    // 적용한다 — 그 뒤로 checkForNewerSession이 새 세션 파일을 발견해 attachTo를 다시
+    // 부르는 경우(사용자가 관찰 도중 새 대화를 시작함)는 그 세션 전체가 "관찰 시작 이후"
+    // 생긴 것이라 스킵할 과거가 없다. 여기서도 매번 startAtEnd를 쓰면, 새 세션 파일이
+    // 폴링 주기(SESSION_FILE_POLL_MS, 2초) 안에 이미 첫 prompt 줄까지 쓰인 뒤에야
+    // 감지되는 흔한 경우, 그 첫 줄(=currentPromptIdBySession을 채우는 유일한 계기)을
+    // 통째로 건너뛰어 그 세션의 모든 tool_use가 promptId 없는 고아 이벤트로 영원히
+    // 남는 버그가 있었다(실제로 재현됨: prompts 테이블은 텅 빈 채로 tool_events만 계속
+    // 쌓여 "현재 프롬프트" 카드가 영원히 "첫 작업을 기다리는 중"으로 멈춰 있었음).
     currentTailer = tailFile(
       filePath,
       (line) => {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
 import type { AIProvider } from '@ai/types'
 import type { CodeUnitVersionWithUnit, Prompt, SkillLevel, ToolEvent } from '@shared/types'
-import { STEP_IDLE_GAP_MS } from '@shared/steps'
+import { TURN_IDLE_GAP_MS } from '@shared/steps'
 
 const BATCH_SIZE = 5
 // 같은 턴 요약이 계속 실패하면(429 쿼터 소진, 프롬프트 초과 등) 틱마다 같은 턴만
@@ -48,10 +48,11 @@ export function startCaptionWorker(
   // "완료된" 턴만 후보로 삼는다: Stop 훅이 이 턴을 완료 처리했거나(p.completed_at,
   // 가장 직접적이고 즉각적인 신호), 같은 세션에 다음 턴이 이미 시작됐거나(=이 턴은
   // 끝났다는 뜻), 세션 자체가 종료됐거나, 또는 이 턴의 마지막 활동으로부터
-  // STEP_IDLE_GAP_MS가 지났을 때. 뒤의 세 조건은 Stop 훅 신호가 없던(구버전 DB의
-  // 과거 데이터, 혹은 훅이 어떤 이유로 못 온 경우) 폴백으로 유지한다 — 이 턴에
-  // 나중에(90초 넘게 쉬었다가) 이벤트가 더 붙으면 이미 저장된 캡션은 갱신되지 않는데
-  // — 드문 경우이고, 없어서 영원히 안 끝나는 문제보다는 낫다고 판단했다.
+  // TURN_IDLE_GAP_MS가 지났을 때. 뒤의 세 조건은 Stop 훅 신호가 없던(구버전 DB의
+  // 과거 데이터, 혹은 훅이 어떤 이유로 못 온 경우 — 흔하다: 관찰 시작 전에 이미 열려
+  // 있던 Claude Code 세션은 훅이 아예 안 붙는다) 폴백으로 유지한다 — 이 턴에 나중에
+  // (TURN_IDLE_GAP_MS 넘게 쉬었다가) 이벤트가 더 붙으면 이미 저장된 캡션은 갱신되지
+  // 않는데 — 드문 경우이고, 없어서 영원히 안 끝나는 문제보다는 낫다고 판단했다.
   // 세션을 최신 세션 하나로 한정하지 않는다 — 과거 세션을 고정해 보거나 난이도를 바꾼
   // 경우에도 그 세션의 턴 해설이 채워져야 한다(버전 요약이 이미 전역 대상인 것과 동일).
   // 최신 세션부터 처리해 라이브 화면이 항상 먼저 채워진다.
@@ -86,6 +87,10 @@ export function startCaptionWorker(
     SELECT * FROM tool_events WHERE prompt_id = @prompt_id ORDER BY created_at ASC
   `)
 
+  // prompts.completed_at 자체를 채우는 idle 폴백은 pipeline/index.ts의
+  // repo.completeIdlePrompts()가 담당한다(20초, 아직 실행 중인 tool_event가 있으면
+  // 건너뛰는 가드 + 오판 시 되돌리는 로직 포함) — 여기서는 그 결과(completed_at)를
+  // "캡션을 만들어도 되는가" 판단에만 참고한다.
   const getUncaptionedVersions = db.prepare(`
     SELECT v.*, u.unit_name, u.unit_type, u.file_path
     FROM code_unit_versions v
@@ -153,7 +158,8 @@ export function startCaptionWorker(
       const skillLevel = ((getSkillLevel.get() as { value: string } | undefined)?.value ??
         'intermediate') as SkillLevel
 
-      const idleCutoff = new Date(Date.now() - STEP_IDLE_GAP_MS).toISOString()
+      const idleCutoff = new Date(Date.now() - TURN_IDLE_GAP_MS).toISOString()
+
       let completedTurn = getNextCompletedTurn.get({ skill_level: skillLevel, idle_cutoff: idleCutoff }) as
         | Prompt
         | undefined

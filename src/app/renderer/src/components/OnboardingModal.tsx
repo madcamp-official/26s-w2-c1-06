@@ -26,6 +26,9 @@ interface OnboardingModalProps {
 
 const STEPS = ['수강 과목', '프로젝트 경험', '교육 스타일'] as const
 
+const KNOWN_COURSES = new Set<string>([...KAIST_REQUIRED_COURSES, ...KAIST_HIGHLIGHTED_ELECTIVES])
+const KNOWN_STACK = new Set<string>(STACK_PRESETS)
+
 function Chip({
   active,
   onClick,
@@ -51,21 +54,49 @@ function Chip({
   )
 }
 
-// SPEC 5.1 온보딩: 3단계 위저드로 실력 수준을 추정한다.
+export interface SkillProfileWizardProps {
+  // 이미 답한 적 있는 프로필(설정에서 다시 열 때) — 있으면 각 단계 선택 상태를 그대로 채워서 시작한다.
+  initialProfile?: OnboardingProfile | null
+  onFinish: (level: SkillLevel, profile: OnboardingProfile) => void
+  // 있으면 헤더에 닫기(X) 버튼과 배경 클릭 닫기를 켠다 — 최초 온보딩은 건너뛸 수 없어야
+  // 하므로 이 prop을 안 넘긴다(OnboardingModal 참조).
+  onClose?: () => void
+  headerTitle?: string
+  headerDescription?: string
+}
+
+// SPEC 5.1 온보딩 위저드: 3단계로 실력 수준을 추정한다.
 // 1단계(수강 과목)는 이론 기반(Bottom-up), 2단계(프로젝트/스택)는 실전 경험(Top-down)
 // 신호를 모으고, computeSkillProfile이 둘을 합쳐 "두 학습 방향이 만나는 지점"을
-// 5단계 슬라이더 위치로 계산한다. 3단계(교육 스타일)는 그 위치를 성향에 맞게
-// 미세 조정한다. 계산된 레벨은 이후 사이드바의 "난이도 조절" 슬라이더로 언제든 바꿀 수 있다.
-export function OnboardingModal({ onSelect }: OnboardingModalProps) {
+// 5단계 위치로 계산한다. 3단계(교육 스타일)는 그 위치를 성향에 맞게 미세 조정한다.
+// 최초 온보딩(OnboardingModal)과 사이드바 "설정"(SkillSettingsModal) 둘 다 이 위저드를
+// 그대로 재사용한다 — 답변 구조와 계산 로직이 완전히 같아, 두 화면을 따로 유지할 이유가 없다.
+export function SkillProfileWizard({
+  initialProfile,
+  onFinish,
+  onClose,
+  headerTitle = '개발 지식 수준을 알려주세요',
+  headerDescription = '설명의 톤과 깊이를 맞추는 데 사용해요. 사이드바의 설정에서 언제든 다시 바꿀 수 있어요.'
+}: SkillProfileWizardProps) {
   const [step, setStep] = useState(0)
-  const [selectedCourses, setSelectedCourses] = useState<Set<string>>(new Set())
-  const [customCourses, setCustomCourses] = useState<string[]>([])
+  const [selectedCourses, setSelectedCourses] = useState<Set<string>>(
+    () => new Set((initialProfile?.courses ?? []).filter((c) => KNOWN_COURSES.has(c)))
+  )
+  const [customCourses, setCustomCourses] = useState<string[]>(
+    () => (initialProfile?.courses ?? []).filter((c) => !KNOWN_COURSES.has(c))
+  )
   const [courseDraft, setCourseDraft] = useState('')
-  const [projectBucket, setProjectBucket] = useState<ProjectCountBucket | null>(null)
-  const [selectedStack, setSelectedStack] = useState<Set<string>>(new Set())
-  const [customStack, setCustomStack] = useState<string[]>([])
+  const [projectBucket, setProjectBucket] = useState<ProjectCountBucket | null>(
+    initialProfile?.projectBucket ?? null
+  )
+  const [selectedStack, setSelectedStack] = useState<Set<string>>(
+    () => new Set((initialProfile?.stack ?? []).filter((s) => KNOWN_STACK.has(s)))
+  )
+  const [customStack, setCustomStack] = useState<string[]>(
+    () => (initialProfile?.stack ?? []).filter((s) => !KNOWN_STACK.has(s))
+  )
   const [stackDraft, setStackDraft] = useState('')
-  const [style, setStyle] = useState<TeachingStyle | null>(null)
+  const [style, setStyle] = useState<TeachingStyle | null>(initialProfile?.style ?? null)
 
   const toggleCourse = (course: string): void => {
     setSelectedCourses((prev) => {
@@ -114,22 +145,36 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
       style
     }
     const { level } = computeSkillProfile(profile)
-    onSelect(level, profile)
+    onFinish(level, profile)
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-[#21221f]/80 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-[560px] rounded-xl border border-border bg-card shadow-[0_24px_60px_rgba(33,34,31,.2)]">
+    <div
+      className="fixed inset-0 z-50 grid place-items-center bg-[#21221f]/80 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[560px] rounded-xl border border-border bg-card shadow-[0_24px_60px_rgba(33,34,31,.2)]"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center gap-3 border-b border-border p-6 pb-5">
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#285c52] text-[#ffffff]">
             <BrainCircuit size={19} strokeWidth={2.3} />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-[17px] font-semibold tracking-[-0.02em]">개발 지식 수준을 알려주세요</h2>
-            <p className="text-[12px] text-muted-foreground">
-              설명의 톤과 깊이를 맞추는 데 사용해요. 사이드바의 난이도 조절로 언제든 바꿀 수 있어요.
-            </p>
+            <h2 className="text-[17px] font-semibold tracking-[-0.02em]">{headerTitle}</h2>
+            <p className="text-[12px] text-muted-foreground">{headerDescription}</p>
           </div>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="닫기"
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-[#6d7069] transition hover:bg-[#f1f0eb] hover:text-[#373832]"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2 px-6 pt-5">
@@ -366,7 +411,7 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
               disabled={!canFinish}
               className="flex items-center gap-1.5 rounded-lg bg-[#285c52] px-4 py-2 text-[12.5px] font-semibold text-[#ffffff] transition hover:bg-[#1f4a41] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              시작하기
+              {onClose ? '저장하기' : '시작하기'}
               <Check size={15} />
             </button>
           )}
@@ -374,4 +419,9 @@ export function OnboardingModal({ onSelect }: OnboardingModalProps) {
       </div>
     </div>
   )
+}
+
+// 최초 실행 시 뜨는 필수 온보딩 — 건너뛸 수 없으므로 onClose를 넘기지 않는다.
+export function OnboardingModal({ onSelect }: OnboardingModalProps) {
+  return <SkillProfileWizard onFinish={onSelect} />
 }

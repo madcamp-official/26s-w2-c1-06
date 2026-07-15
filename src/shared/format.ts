@@ -57,6 +57,33 @@ export function stripSystemContextTags(text: string | null): string {
   return text.replace(SYSTEM_CONTEXT_TAG_PATTERN, '').trim()
 }
 
+// LLM이 "Markdown 문서를 작성해줘" 요청에 응답하면서, 답이 이미 Markdown인데도
+// 습관적으로 ```markdown ... ``` 코드 펜스로 한 번 더 감싸는 경우가 있다(강의노트
+// 생성 프롬프트에서 실제로 재현됨) — 그러면 react-markdown이 전체를 하나의 코드
+// 블록으로 보고 렌더링해서 #/##/**가 전부 그대로 텍스트로 보이고, 첫 줄을 제목으로
+// 쓰는 곳(noteTitle)도 펜스 표시줄(```markdown)을 제목으로 잘못 뽑는다.
+// 전체를 한 번에 매칭하는 정규식 대신 첫 줄/마지막 줄만 검사한다 — 본문 중간에
+// 정상적인 코드 예제(```python ... ``` 등)가 껴 있어도 안전하고(중첩된 펜스와
+// 헷갈리지 않음), OpenAI 응답의 CRLF 줄바꿈에도 흔들리지 않는다.
+const FENCE_OPEN_PATTERN = /^```(?:markdown|md)?$/
+const FENCE_CLOSE_PATTERN = /^```$/
+
+export function stripMarkdownFence(markdown: string): string {
+  const lines = markdown.trim().split('\n')
+  if (lines.length < 2) return markdown.trim()
+
+  const firstLine = lines[0].trim()
+  const lastLine = lines[lines.length - 1].trim()
+  if (!FENCE_OPEN_PATTERN.test(firstLine) || !FENCE_CLOSE_PATTERN.test(lastLine)) {
+    return markdown.trim()
+  }
+
+  return lines
+    .slice(1, -1)
+    .join('\n')
+    .trim()
+}
+
 export function parseConceptTags(json: string | null): string[] {
   if (!json) return []
   try {

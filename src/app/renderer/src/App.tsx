@@ -5,11 +5,11 @@ import {
   FolderKanban,
   Menu,
   Plus,
+  SlidersHorizontal,
   Sparkles,
   Terminal,
   X
 } from 'lucide-react'
-import { DifficultySlider } from './components/DifficultySlider'
 import { LectureNotesViewer } from './components/LectureNotesViewer'
 import { MonitoringControl } from './components/MonitoringControl'
 import { OnboardingModal } from './components/OnboardingModal'
@@ -18,6 +18,7 @@ import { PromptTimeline } from './components/PromptTimeline'
 import { QnaChat } from './components/QnaChat'
 import { RecentTurns } from './components/RecentTurns'
 import { SessionContextBar } from './components/SessionContextBar'
+import { SkillSettingsModal } from './components/SkillSettingsModal'
 import { StructureOverview } from './components/StructureOverview'
 import { TurnDetailPanel } from './components/TurnDetailPanel'
 import { buildTurnList, ORPHAN_TURN_ID } from './components/TurnList'
@@ -32,8 +33,8 @@ import { useSkillLevel } from './hooks/useSkillLevel'
 import { useSteps } from './hooks/useSteps'
 import { useTurnDetail } from './hooks/useTurnDetail'
 import { useUnitTimeline } from './hooks/useUnitTimeline'
-import type { Project } from '@shared/types'
-import { formatRelativeTime, stripSystemContextTags } from '@shared/format'
+import type { OnboardingProfile, Project, SkillLevel } from '@shared/types'
+import { formatRelativeTime, stripMarkdownFence, stripSystemContextTags } from '@shared/format'
 import { SKILL_LEVEL_LABEL } from '@shared/skillProfile'
 
 type ViewKey = 'projects' | 'project'
@@ -75,7 +76,9 @@ function pathLeaf(path: string): string {
 }
 
 function noteTitle(markdown: string): string {
-  const line = markdown.split('\n').find((l) => l.trim().length > 0) ?? '학습 노트'
+  const line = stripMarkdownFence(markdown)
+    .split('\n')
+    .find((l) => l.trim().length > 0) ?? '학습 노트'
   return line.replace(/^#+\s*/, '').slice(0, 44)
 }
 
@@ -107,6 +110,7 @@ function App() {
   const [view, setView] = useState<ViewKey>('projects')
   const [activeTab, setActiveTab] = useState<ProjectTab>('overview')
   const [sideOpen, setSideOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null)
   const currentProject = projects.projects.find((p) => p.id === currentProjectId) ?? null
   const [deletingProject, setDeletingProject] = useState(false)
@@ -124,8 +128,15 @@ function App() {
   // 스텝 단위로 채워진다. liveStatus는 "지금 하는 중" 한 줄, DB 폴링보다 훨씬 빠르다.
   const steps = useSteps(sessionId, skillLevel)
   const liveStatus = useLiveStatus()
-  const { notes, regenerate } = useLectureNotes(currentProjectId)
+  const { notes } = useLectureNotes(currentProjectId)
   const { needsOnboarding, complete } = useOnboarding(setSkillLevel)
+  // 사이드바 "설정"에서 온보딩 위저드를 다시 열어 난이도를 조정할 때 — 온보딩 최초
+  // 완료 때와 동일하게 난이도를 적용하고 원본 프로필을 저장해, 다음에 또 열면 방금
+  // 답한 내용이 그대로 채워져 있게 한다.
+  const applySkillProfile = (level: SkillLevel, profile: OnboardingProfile): void => {
+    setSkillLevel(level)
+    window.factcoding.saveOnboardingProfile(profile)
+  }
   const qna = useQna(sessionId, skillLevel)
   const [qnaOpen, setQnaOpen] = useState(false)
   // null = 아직 명시적으로 고른 프롬프트가 없음 → 기본값(가장 최근 프롬프트)을 계산해서 보여준다.
@@ -136,13 +147,38 @@ function App() {
     setSelectedTurnId(null)
   }, [sessionId])
 
+  // "오늘은 여기까지"로 방금 완료한 세션의 id — 노트 탭에서 그 세션의 요약을 찾아
+  // 강조 배너로 보여주고 "계속하기"를 띄우는 데 쓴다. 강의노트는 completeMonitoring
+  // 직후가 아니라 lecture-note-worker가 몇 초 뒤 비동기로 만들어(useLectureNotes가
+  // 'lecture-note' push로 자동 반영) 채워지므로, 클릭 시점엔 아직 없을 수 있다 —
+  // 그래서 세션 id만 기억해두고 노트 유무는 렌더링 시점에 매번 다시 확인한다.
+  const [justCompletedSessionId, setJustCompletedSessionId] = useState<string | null>(null)
+
   const goToProjects = (): void => setView('projects')
   const selectProject = (projectId: string): void => {
     setCurrentProjectId(projectId)
     setSelectedSessionId(null)
     setActiveTab('overview')
+    setJustCompletedSessionId(null)
     setView('project')
     setSideOpen(false)
+  }
+
+  // "완료" 버튼("오늘은 여기까지"): 관찰을 끝내는 것에 더해, 자동으로 노트 탭으로
+  // 넘겨서 방금 끝난 이 세션의 요약을 바로 보여준다.
+  const completeSessionAndShowSummary = async (): Promise<void> => {
+    const completedSessionId = monitoring.sessionId
+    await monitoring.complete()
+    if (completedSessionId) setJustCompletedSessionId(completedSessionId)
+    setActiveTab('notes')
+  }
+
+  // "계속하기": 노트 요약을 보다가 이어서 같은 프로젝트를 다시 관찰하고 싶을 때.
+  // 강조 배너는 새 세션이 시작되면 더 이상 "방금 끝난 세션"이 아니므로 지운다.
+  const continueMonitoring = async (): Promise<void> => {
+    setJustCompletedSessionId(null)
+    await monitoring.start()
+    setActiveTab('activity')
   }
 
   // 지금 화면에 있는 프로젝트를 파이프라인이 관찰 중이면(다른 프로젝트가 아니라
@@ -173,21 +209,36 @@ function App() {
   // 늦게 도착해서 에이전트가 실제로 멈춘 뒤에도 한참 "실행 중"으로 보이는 문제가 있었다.
   const currentTurnCompleted = currentTurn ? currentTurn.completed_at != null : false
 
-  // "현재 프롬프트" 진행바 — 에이전트 작업은 오픈엔디드라 "전체 대비 몇 %"를 미리 알
-  // 방법이 없다. 대신 이 턴에서 지금까지 구조적으로 닫힌(더 이상 이벤트가 안 붙는)
-  // 스텝 개수를 고정 사이클로 정규화해서 보여준다 — steps는 이미 promptId/inProgress를
-  // 들고 있어(useSteps) 이 턴 것만 걸러 쓰면 된다. 완벽한 예측은 아니지만 스텝이 실제로
-  // 끝날 때마다 진짜로 전진하는 신호라, 고정 55%에 멈춰 있던 예전 방식보다는 정직하다.
-  // 95%로 캡을 두는 이유: 스텝이 목표치를 넘었다고 바를 100%로 채우면 상태 텍스트는
-  // 아직 "실행 중"인데 바는 "완료"로 보이는 모순이 생긴다 — 실제 완료(currentTurnCompleted,
-  // Stop 훅 신호) 시점에만 100%로 스냅한다.
-  const TURN_PROGRESS_STEP_TARGET = 8
-  const currentTurnStepCount = currentTurn
-    ? steps.filter((s) => s.promptId === currentTurn.id && !s.inProgress).length
-    : 0
-  const currentTurnProgressPercent = currentTurnCompleted
-    ? 100
-    : Math.min(95, Math.round((currentTurnStepCount / TURN_PROGRESS_STEP_TARGET) * 100))
+  // "현재 프롬프트" 진행 상태 — 에이전트 작업은 오픈엔디드라 "전체 대비 몇 %"를 미리 알
+  // 방법이 없다. 이 턴에서 닫힌 스텝 수(더 이상 이벤트가 안 붙는 단위) + 지금 열려 있는
+  // 스텝(+0.5)을 90%로 포화하는 점근 곡선(1 - 0.7^n)에 넣어, 스텝이 쌓일수록 완만히
+  // 차오르다가 완료 직전엔 이미 85~90%에 도달해 마지막 채움이 부드럽게 마무리되게 한다
+  // (예전엔 스텝수/고정목표라 스텝이 적을 때 25%쯤에서 멈췄다가 완료 시 100%로 급히 튀었다).
+  const currentTurnSteps = currentTurn
+    ? steps.filter((s) => s.promptId === currentTurn.id)
+    : []
+  const currentTurnStepCount = currentTurnSteps.filter((s) => !s.inProgress).length
+  const currentTurnHasActiveStep = currentTurnSteps.some((s) => s.inProgress)
+  // "이 턴은 끝났다"는 completed_at(Stop 훅/90초 idle 폴백)을 우선 근거로 삼되, Stop 훅이
+  // 안 온 세션(흔하다 — 관찰 시작 전에 이미 열려 있던 Claude Code 세션은 훅이 하나도 안
+  // 붙는다)에서도 90초씩 기다리지 않도록 liveStatus.idle(step-worker가 1.5초 주기로
+  // 갱신하는 "지금 아무 도구도 안 쓰고 있다" 신호, idle 판정까지 45초)을 보조로 쓴다.
+  // liveStatus는 세션 전체에서 가장 최근 스텝 하나만 보고 계산되는 전역 신호라 그대로
+  // 쓰면 안 된다 — 새 턴이 막 시작해 이 턴의 스텝이 아직 하나도 없는 순간엔 "직전 턴의
+  // 마지막 스텝이 idle"이라는 이유만으로 새 턴을 완료로 잘못 판정해, 시작하자마자 100%로
+  // 찍혔다가 첫 스텝이 잡히면 낮은 값으로 리셋되는 버그가 있었다. 그래서 이 턴 자신의
+  // 스텝이 실제로 하나라도 생긴 뒤에만(currentTurnSteps.length > 0) liveStatus.idle을
+  // 신뢰한다 — 그 시점부턴 세션의 "가장 최근 스텝"이 곧 이 턴의 스텝이므로(다음 턴은
+  // 아직 없음) 안전하다. 캡션("직전 실행 과정") 생성은 completed_at 하나만 보고 뒤늦게
+  // 따라오므로, 이 빠른 신호로 100%를 채워도 캡션 타이밍과는 무관하게 동작한다.
+  const currentTurnLiveIdle = currentTurnSteps.length > 0 && liveStatus.idle
+  const currentTurnDone = currentTurn != null && (currentTurnCompleted || currentTurnLiveIdle)
+  const currentTurnProgressPercent = (() => {
+    if (!monitoring.isMonitoring || currentTurn == null) return 0
+    if (currentTurnDone) return 100
+    const effectiveSteps = currentTurnStepCount + (currentTurnHasActiveStep ? 0.5 : 0)
+    return Math.round(5 + 85 * (1 - Math.pow(0.7, effectiveSteps)))
+  })()
 
   const turnItems = useMemo(() => buildTurnList(prompts, events), [prompts, events])
   const defaultTurnId = useMemo(() => {
@@ -195,7 +246,9 @@ function App() {
     if (realTurns.length > 0) return realTurns[realTurns.length - 1].turnId
     return turnItems[0]?.turnId ?? null
   }, [turnItems])
-  const effectiveTurnId = selectedTurnId ?? defaultTurnId
+  // selectedTurnId === ''(빈 문자열)은 "명시적으로 접음" 상태 — null(아직 아무것도
+  // 안 골랐음, 기본값 사용)과 구분해야 접었던 항목이 defaultTurnId로 다시 살아나지 않는다.
+  const effectiveTurnId = selectedTurnId === '' ? null : (selectedTurnId ?? defaultTurnId)
   const selectedTurnItem = turnItems.find((t) => t.turnId === effectiveTurnId) ?? null
 
   const turnDetail = useTurnDetail(
@@ -243,6 +296,11 @@ function App() {
   return (
     <main className="min-h-screen bg-background font-sans text-foreground">
       {needsOnboarding && <OnboardingModal onSelect={complete} />}
+      <SkillSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSelect={applySkillProfile}
+      />
 
       <header className="sticky top-0 z-20 flex h-[72px] items-center justify-between border-b border-border bg-[#fbfaf7]/90 px-5 backdrop-blur-lg md:px-10">
         <div className="flex items-center gap-3">
@@ -257,11 +315,14 @@ function App() {
           <button
             type="button"
             onClick={goToProjects}
-            className="flex items-center gap-2.5"
+            className="group flex items-center gap-2.5"
             aria-label="프로젝트 홈으로 이동"
           >
             <div className="grid size-7 place-items-center rounded-[9px] bg-[#285c52] text-white">
-              <Sparkles size={15} />
+              <Sparkles
+                size={15}
+                className="transition-all duration-300 group-hover:fill-[#fde047] group-hover:text-[#fde047] group-hover:drop-shadow-[0_0_6px_rgba(253,224,71,.9)]"
+              />
             </div>
             <span className="text-[17px] font-semibold tracking-[-.04em]">factcoding</span>
           </button>
@@ -364,10 +425,19 @@ function App() {
               학습 노트
             </button>
 
-            <div>
-              <p className="mb-2 px-1 text-[11px] font-semibold text-[#6d7069]">난이도 조절</p>
-              <DifficultySlider value={skillLevel} onChange={setSkillLevel} />
-            </div>
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[13px] text-[#686b64] transition hover:bg-[#f1f0eb]"
+            >
+              <SlidersHorizontal size={17} />
+              <span className="min-w-0 flex-1">
+                <span className="block">설정</span>
+                <span className="block text-[11px] text-muted-foreground">
+                  난이도: {SKILL_LEVEL_LABEL[skillLevel]}
+                </span>
+              </span>
+            </button>
           </div>
         </aside>
 
@@ -403,17 +473,20 @@ function App() {
                 monitoring={monitoring}
                 monitoringDisabled={monitoringDisabled}
                 monitoringDisabledReason={monitoringDisabledReason}
+                onCompleteSession={completeSessionAndShowSummary}
+                justCompletedSessionId={justCompletedSessionId}
+                onContinueMonitoring={continueMonitoring}
                 onDeleteProject={deleteCurrentProject}
                 deletingProject={deletingProject}
                 deleteProjectDisabled={isMonitoringCurrentProject}
-                deleteProjectDisabledReason="관찰 중에는 삭제할 수 없어요. 먼저 완료를 눌러주세요"
+                deleteProjectDisabledReason="관찰 중에는 삭제할 수 없어요. 먼저 '오늘은 여기까지'를 눌러주세요"
                 sessionId={sessionId}
                 prompts={prompts}
                 events={events}
                 explanations={explanations}
                 loading={loading}
                 currentTurn={currentTurn}
-                currentTurnCompleted={currentTurnCompleted}
+                currentTurnDone={currentTurnDone}
                 currentTurnStepCount={currentTurnStepCount}
                 currentTurnProgressPercent={currentTurnProgressPercent}
                 effectiveTurnId={effectiveTurnId}
@@ -429,7 +502,6 @@ function App() {
                 filesTouched={filesTouched}
                 notes={notes}
                 recentNotes={recentNotes}
-                onRegenerateNote={regenerate}
                 qna={qna}
                 qnaOpen={qnaOpen}
                 onToggleQna={() => setQnaOpen((prev) => !prev)}
@@ -448,6 +520,9 @@ interface ProjectPageProps {
   monitoring: ReturnType<typeof useMonitoring>
   monitoringDisabled: boolean
   monitoringDisabledReason: string | undefined
+  onCompleteSession: () => Promise<void>
+  justCompletedSessionId: string | null
+  onContinueMonitoring: () => Promise<void>
   onDeleteProject: () => void
   deletingProject: boolean
   deleteProjectDisabled: boolean
@@ -458,7 +533,7 @@ interface ProjectPageProps {
   explanations: ReturnType<typeof useSessionTrace>['explanations']
   loading: boolean
   currentTurn: ReturnType<typeof useSessionTrace>['prompts'][number] | null
-  currentTurnCompleted: boolean
+  currentTurnDone: boolean
   currentTurnStepCount: number
   currentTurnProgressPercent: number
   effectiveTurnId: string | null
@@ -474,7 +549,6 @@ interface ProjectPageProps {
   filesTouched: Array<[string, number]>
   notes: ReturnType<typeof useLectureNotes>['notes']
   recentNotes: ReturnType<typeof useLectureNotes>['notes']
-  onRegenerateNote: ReturnType<typeof useLectureNotes>['regenerate']
   qna: ReturnType<typeof useQna>
   qnaOpen: boolean
   onToggleQna: () => void
@@ -487,6 +561,9 @@ function ProjectPage({
   monitoring,
   monitoringDisabled,
   monitoringDisabledReason,
+  onCompleteSession,
+  justCompletedSessionId,
+  onContinueMonitoring,
   onDeleteProject,
   deletingProject,
   deleteProjectDisabled,
@@ -497,7 +574,7 @@ function ProjectPage({
   explanations,
   loading,
   currentTurn,
-  currentTurnCompleted,
+  currentTurnDone,
   currentTurnStepCount,
   currentTurnProgressPercent,
   effectiveTurnId,
@@ -513,7 +590,6 @@ function ProjectPage({
   filesTouched,
   notes,
   recentNotes,
-  onRegenerateNote,
   qna,
   qnaOpen,
   onToggleQna
@@ -555,7 +631,7 @@ function ProjectPage({
             disabled={monitoringDisabled}
             disabledReason={monitoringDisabledReason}
             onStart={monitoring.start}
-            onComplete={monitoring.complete}
+            onComplete={onCompleteSession}
             onDelete={onDeleteProject}
             deleting={deletingProject}
             deleteDisabled={deleteProjectDisabled}
@@ -606,7 +682,7 @@ function ProjectPage({
               explanations={explanations}
               loading={loading}
               expandedTurnId={effectiveTurnId}
-              onToggleTurn={onSelectTurn}
+              onToggleTurn={(turnId) => onSelectTurn(effectiveTurnId === turnId ? '' : turnId)}
               detailUnits={turnUnits}
               detailEdges={turnEdges}
               detailVersions={turnDetail.versions}
@@ -638,7 +714,7 @@ function ProjectPage({
                   </span>
                   {monitoring.isMonitoring && (
                     <span className="text-[11px] font-semibold text-[#285c52]">
-                      {currentTurnCompleted ? '완료' : '실행 중'}
+                      {currentTurnDone ? '완료' : '실행 중'}
                     </span>
                   )}
                 </div>
@@ -656,9 +732,9 @@ function ProjectPage({
                 <div className="mt-2 flex justify-between text-[10px] text-muted-foreground">
                   <span>
                     {monitoring.isMonitoring
-                      ? currentTurnCompleted
-                        ? '작업 완료'
-                        : `스텝 ${currentTurnStepCount}개 진행됨`
+                      ? currentTurnDone
+                        ? '작업 완료 · 100%'
+                        : `스텝 ${currentTurnStepCount}개 진행됨 · ${currentTurnProgressPercent}%`
                       : '업데이트 없음'}
                   </span>
                   <span>{monitoring.isMonitoring ? `프롬프트 ${prompts.length}개 관찰됨` : '트래킹을 켜세요'}</span>
@@ -750,7 +826,7 @@ function ProjectPage({
                 </>
               )}
             </div>
-            <h2 className="max-w-[900px] text-[22px] font-semibold leading-tight tracking-[-0.03em] sm:text-[25px]">
+            <h2 className="max-w-[900px] truncate text-[22px] font-semibold leading-tight tracking-[-0.03em] sm:text-[25px]">
               {selectedTurnItem
                 ? selectedTurnItem.turnId === ORPHAN_TURN_ID
                   ? '수동으로 수정된 파일들'
@@ -772,6 +848,7 @@ function ProjectPage({
             onSelectTurn={onSelectTurn}
             liveStatus={liveStatus}
           />
+
           <TurnDetailPanel
             turn={selectedTurnItem}
             units={turnUnits}
@@ -808,7 +885,14 @@ function ProjectPage({
         </div>
       )}
 
-      {activeTab === 'notes' && <LectureNotesViewer notes={notes} onRegenerate={onRegenerateNote} />}
+      {activeTab === 'notes' && (
+        <LectureNotesViewer
+          notes={notes}
+          justCompletedSessionId={justCompletedSessionId}
+          onContinue={onContinueMonitoring}
+          continuePending={monitoring.pending}
+        />
+      )}
     </>
   )
 }

@@ -14,8 +14,9 @@ interface MonitoringControlProps {
 }
 
 // 여러 AI 에이전트/프로젝트를 오갈 수 있는 사용자를 위해, 앱이 떠 있다고 항상
-// 관찰 중인 게 아니라 이 버튼을 눌러야만 관찰이 켜지고 꺼진다. "완료"는 지금 보고
-// 있는 세션을 종료 처리해 강의노트 자동 합성을 트리거한다(SPEC 4.3.2).
+// 관찰 중인 게 아니라 이 버튼을 눌러야만 관찰이 켜지고 꺼진다. "오늘은 여기까지"는
+// 지금 보고 있는 세션을 종료 처리해 강의노트 자동 합성을 트리거하고(SPEC 4.3.2),
+// 호출부(App.tsx)가 곧바로 노트 탭으로 넘겨 방금 끝난 세션의 요약을 보여준다.
 // disabled는 프로젝트 미선택(project 탭에서 아직 아무것도 안 고름) 또는 다른
 // 프로젝트를 이미 관찰 중인 경우 — disabledReason으로 이유를 안내한다.
 export function MonitoringControl({
@@ -57,7 +58,7 @@ export function MonitoringControl({
           className="flex items-center gap-2 rounded-lg bg-[#285c52] px-3.5 py-2 text-[12px] font-semibold text-[#ffffff] transition hover:bg-[#1f4a41] disabled:opacity-50"
         >
           <CheckCheck size={15} />
-          {pending ? '완료 처리 중…' : '완료'}
+          {pending ? '마무리하는 중…' : '오늘은 여기까지'}
         </button>
       </div>
     )
