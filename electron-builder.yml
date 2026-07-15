@@ -18,6 +18,12 @@ extraResources:
     to: pipeline/hooks/session-event-hook.mjs
   - from: node_modules/web-tree-sitter/tree-sitter.wasm
     to: pipeline/tree-sitter.wasm
+  # TODO(ctags 패키징 미완료): dev 모드는 시스템에 설치된 Universal Ctags를 경로로 찾아 쓰지만
+  # (app/main/index.ts의 resolveDevCtagsBinary), 여기 번들할 pipeline/ctags/ctags는 아직 없다.
+  # Homebrew binary는 jansson/libyaml에 동적 링크돼 있어 그대로 복사하면 다른 기기에서 실행이
+  # 안 된다 — 정적 링크로 다시 빌드한 바이너리(플랫폼별)를 준비해 아래 주석을 풀 것.
+  # - from: resources/ctags-mac/ctags
+  #   to: pipeline/ctags/ctags
 win:
   target: nsis
 mac:

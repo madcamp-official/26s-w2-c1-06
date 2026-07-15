@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { PipelineConfig } from '../shared/types.js';
 
@@ -12,6 +13,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(__dirname, '..', '..');
 
 export const SCHEMA_PATH = path.join(REPO_ROOT, 'db', 'schema.sql');
+
+// app/main/index.ts의 resolveDevCtagsBinary()와 같은 이유(dev 환경엔 번들된 바이너리가
+// 없음) — CLI는 Electron 앱보다 항상 터미널에서 직접 실행되므로 PATH 조회 폴백이 더 안전하다.
+function resolveCtagsBinary(): string {
+  const candidates = ['/opt/homebrew/bin/ctags', '/usr/local/bin/ctags'];
+  return candidates.find((p) => existsSync(p)) ?? 'ctags';
+}
 
 export function loadConfig(): PipelineConfig {
   return {
@@ -27,6 +35,7 @@ export function loadConfig(): PipelineConfig {
       coreWasmPath: path.join(REPO_ROOT, 'node_modules', 'web-tree-sitter', 'tree-sitter.wasm'),
       grammarsDir: path.join(REPO_ROOT, 'src', 'pipeline', 'ast-diff', 'grammars'),
       hookScriptPath: path.join(REPO_ROOT, 'src', 'pipeline', 'hooks', 'session-event-hook.mjs'),
+      ctagsBinaryPath: resolveCtagsBinary(),
     },
   };
 }

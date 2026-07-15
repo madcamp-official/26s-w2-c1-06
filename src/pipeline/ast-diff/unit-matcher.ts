@@ -1,4 +1,4 @@
-import type { CodeUnitCandidate, UnitType } from './unit-extractor.js';
+import type { UnitLike, UnitType } from './unit-extractor.js';
 import { makeDiffText } from './diff-text.js';
 
 export interface UnitChange {
@@ -13,7 +13,7 @@ export interface UnitChange {
  * - after에만 있음 → created / before에만 있음 → deleted
  * - 둘 다 있고 본문(text) 다름 → modified(diff_text 생성) / 본문 동일 → 스킵
  */
-export function matchUnits(before: CodeUnitCandidate[], after: CodeUnitCandidate[]): UnitChange[] {
+export function matchUnits(before: UnitLike[], after: UnitLike[]): UnitChange[] {
   const beforeMap = new Map(before.map((u) => [u.unitName, u]));
   const afterMap = new Map(after.map((u) => [u.unitName, u]));
   const changes: UnitChange[] = [];

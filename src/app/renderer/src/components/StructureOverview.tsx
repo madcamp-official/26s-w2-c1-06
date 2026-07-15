@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Background, Controls, ReactFlow, type Edge, type Node } from '@xyflow/react'
+import { Background, Controls, Panel, ReactFlow, type Edge, type Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import type { CodeUnit, CodeUnitEdge, UnitType } from '@shared/types'
 
@@ -22,6 +22,29 @@ const UNIT_TYPE_COLOR: Record<UnitType, string> = {
 
 const COLUMN_WIDTH = 220
 const LAYER_HEIGHT = 90
+
+// parser.ts의 langForFilePath와 동일한 목록 — JS/TS/TSX/Python/Go/Java는 tree-sitter로
+// 노드+엣지(import/calls)까지 뽑지만, 그 외 언어(ctags 경로)는 노드만 나오고 엣지가
+// 전혀 없다(CTAGS_MULTILANG_HANDOFF.md 참조). 렌더러는 DB 조회 없이 file_path 확장자만
+// 보고 이 차이를 판별한다 — 백엔드에 "언어별 지원 수준" 필드를 새로 추가하는 대신 이미
+// 알려진 확장자 목록을 그대로 재사용.
+const FULLY_SUPPORTED_EXTENSIONS = new Set([
+  '.js', '.jsx', '.mjs', '.cjs',
+  '.ts', '.mts', '.cts',
+  '.tsx',
+  '.py',
+  '.go',
+  '.java'
+])
+
+function getExtension(filePath: string): string {
+  const match = filePath.match(/(\.[^./\\]+)$/)
+  return match ? match[0].toLowerCase() : ''
+}
+
+function hasLimitedSupportUnit(units: CodeUnit[]): boolean {
+  return units.some((unit) => !FULLY_SUPPORTED_EXTENSIONS.has(getExtension(unit.file_path)))
+}
 
 // SPEC 4.5 구조도 오버뷰: code_units를 노드, code_unit_edges를 엣지로 렌더.
 // 노드 클릭 시 유닛 타임라인으로 drill-down (Level 1 → Level 3, SPEC 5장).
@@ -68,6 +91,8 @@ export function StructureOverview({
     return { nodes, flowEdges: mergeParallelEdges(edges) }
   }, [units, edges, selectedUnitId])
 
+  const showLimitedSupportNotice = useMemo(() => hasLimitedSupportUnit(units), [units])
+
   if (units.length === 0) {
     return <p className="px-5 py-10 text-center text-[13px] text-muted-foreground">{emptyMessage}</p>
   }
@@ -84,6 +109,13 @@ export function StructureOverview({
       >
         <Background />
         <Controls showInteractive={false} />
+        {showLimitedSupportNotice && (
+          <Panel position="bottom-right">
+            <p className="max-w-[220px] rounded-md bg-white/90 px-2 py-1 text-right text-[10px] leading-tight text-muted-foreground shadow-sm">
+              일부 언어는 노드만 표시되고 연결선(호출/임포트)은 지원되지 않습니다.
+            </p>
+          </Panel>
+        )}
       </ReactFlow>
     </div>
   )

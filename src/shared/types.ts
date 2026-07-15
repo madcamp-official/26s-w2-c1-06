@@ -259,6 +259,8 @@ export interface PipelineAssetPaths {
   grammarsDir: string
   /** SessionStart/SessionEnd 훅 스크립트 (src/pipeline/hooks/session-event-hook.mjs) */
   hookScriptPath: string
+  /** Universal Ctags 실행 파일 — JS/TS/TSX 외 언어의 구조도 추출(ctags-extractor.ts)에 사용 */
+  ctagsBinaryPath: string
 }
 
 export interface PipelineConfig {

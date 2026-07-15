@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { config as loadEnv } from 'dotenv'
@@ -91,18 +92,30 @@ const loadContextBundle = createContextBundleLoader(db)
 // 리포 자체를 관찰한다 (dev에서 셀프 관찰 데모가 됨).
 // 정적 자산 경로는 import.meta/__dirname 대신 여기서 명시적으로 계산해 주입한다
 // (번들링되면 그 경로들이 산출물 위치를 가리키게 되므로 — db/connection.ts와 같은 이유).
+// packaged 빌드는 electron-builder.yml의 extraResources로 담아준 바이너리를 쓴다.
+// dev 모드는 아직 앱에 번들링된 바이너리가 없으므로, 이 머신에 Homebrew로 설치된
+// 경로 후보를 먼저 찾고(Apple Silicon/Intel 경로가 다름) 못 찾으면 PATH 조회에 맡긴다
+// (GUI로 띄운 Electron은 로그인 셸의 PATH를 못 물려받을 수 있어 완전히 안전하진 않다 —
+// `npm run dev`처럼 터미널에서 띄우면 문제없다).
+function resolveDevCtagsBinary(): string {
+  const candidates = ['/opt/homebrew/bin/ctags', '/usr/local/bin/ctags']
+  return candidates.find((p) => existsSync(p)) ?? 'ctags'
+}
+
 const pipelineAssets = app.isPackaged
   ? {
       schemaPath,
       coreWasmPath: join(process.resourcesPath, 'pipeline', 'tree-sitter.wasm'),
       grammarsDir: join(process.resourcesPath, 'pipeline', 'grammars'),
-      hookScriptPath: join(process.resourcesPath, 'pipeline', 'hooks', 'session-event-hook.mjs')
+      hookScriptPath: join(process.resourcesPath, 'pipeline', 'hooks', 'session-event-hook.mjs'),
+      ctagsBinaryPath: join(process.resourcesPath, 'pipeline', 'ctags', 'ctags')
     }
   : {
       schemaPath,
       coreWasmPath: join(app.getAppPath(), 'node_modules', 'web-tree-sitter', 'tree-sitter.wasm'),
       grammarsDir: join(app.getAppPath(), 'src', 'pipeline', 'ast-diff', 'grammars'),
-      hookScriptPath: join(app.getAppPath(), 'src', 'pipeline', 'hooks', 'session-event-hook.mjs')
+      hookScriptPath: join(app.getAppPath(), 'src', 'pipeline', 'hooks', 'session-event-hook.mjs'),
+      ctagsBinaryPath: resolveDevCtagsBinary()
     }
 
 // 프로젝트: 코드베이스 단위 묶음(이름 + 워크스페이스 경로). 관제실/구조도/강의노트는

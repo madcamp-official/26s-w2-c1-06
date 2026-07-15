@@ -1,7 +1,7 @@
 import path from 'node:path';
 import Parser from 'web-tree-sitter';
 
-export type SupportedLang = 'javascript' | 'typescript' | 'tsx';
+export type SupportedLang = 'javascript' | 'typescript' | 'tsx' | 'python' | 'go' | 'java';
 
 // wasm 경로는 모듈 로드 시점에 import.meta.url로 계산하지 않고 호출부가 주입한다
 // (import.meta 기반 계산은 vite 번들링 시 산출물 경로를 가리키게 됨 — db/connection.ts와
@@ -18,17 +18,23 @@ const GRAMMAR_FILENAMES: Record<SupportedLang, string> = {
   javascript: 'tree-sitter-javascript.wasm',
   typescript: 'tree-sitter-typescript.wasm',
   tsx: 'tree-sitter-tsx.wasm',
+  python: 'tree-sitter-python.wasm',
+  go: 'tree-sitter-go.wasm',
+  java: 'tree-sitter-java.wasm',
 };
 
 let initPromise: Promise<void> | null = null;
 const languageCache = new Map<SupportedLang, Parser.Language>();
 
-/** MVP grammar 지원 범위: JS/TS/TSX 3종 (SPEC 7 리스크 대응). 확장자로 언어를 정한다. */
+/** tree-sitter grammar 지원 범위: JS/TS/TSX/Python/Go/Java. 나머지 언어는 ctags 경로(ctags-extractor.ts)로 간다. */
 export function langForFilePath(filePath: string): SupportedLang | null {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.js' || ext === '.jsx' || ext === '.mjs' || ext === '.cjs') return 'javascript';
   if (ext === '.ts' || ext === '.mts' || ext === '.cts') return 'typescript';
   if (ext === '.tsx') return 'tsx';
+  if (ext === '.py') return 'python';
+  if (ext === '.go') return 'go';
+  if (ext === '.java') return 'java';
   return null;
 }
 

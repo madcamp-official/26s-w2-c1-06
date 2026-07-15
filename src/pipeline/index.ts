@@ -11,9 +11,10 @@ import { watchManualEdits } from './observation/manual-watch.js';
 import { initDb } from './db/init.js';
 import { Repo } from './db/repo.js';
 import { configureParser, parseSource, langForFilePath } from './ast-diff/parser.js';
-import { extractUnits, type CodeUnitCandidate } from './ast-diff/unit-extractor.js';
-import { matchUnits } from './ast-diff/unit-matcher.js';
-import { extractEdges } from './ast-diff/edge-extractor.js';
+import { extractUnits, type UnitLike } from './ast-diff/unit-extractor.js';
+import { matchUnits, type UnitChange } from './ast-diff/unit-matcher.js';
+import { extractEdges, type EdgeCandidate } from './ast-diff/edge-extractor.js';
+import { configureCtags, isCtagsCandidate, extractWithCtags } from './ast-diff/ctags-extractor.js';
 import { computeUnitId } from './ast-diff/unit-id.js';
 import type { PipelineConfig, PipelineHandle, TranscriptEvent } from '../shared/types.js';
 
@@ -46,6 +47,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
   const projectDir = getClaudeProjectDir(config.projectPath);
 
   configureParser(config.assets);
+  configureCtags(config.assets.ctagsBinaryPath);
   const db = initDb(config.dbPath, config.assets.schemaPath);
   const repo = new Repo(db);
   const snapshotCache = new SnapshotCache();
@@ -152,34 +154,27 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
     }
   });
 
-  async function runAstDiff(
+  // tree-sitter 경로(JS/TS/TSX)와 ctags 경로(그 외 언어, SPEC 7 확장) 둘 다 결과를
+  // UnitLike[]/UnitChange[]/EdgeCandidate[]로 맞춰 내놓으므로, DB에 반영하는 로직은
+  // 공통으로 하나만 둔다 — 두 경로의 차이(grammar 유무, calls/renders 엣지 유무)는
+  // 여기 도달하기 전에 이미 흡수되어 있다.
+  function persistUnitsAndEdges(
     filePath: string,
-    before: string,
-    after: string,
+    beforeUnits: UnitLike[],
+    afterUnits: UnitLike[],
+    changes: UnitChange[],
+    edges: EdgeCandidate[],
     toolEventId: string,
     promptId: string | null,
     timestamp: string
   ) {
-    if (!langForFilePath(filePath)) return; // MVP: JS/TS/TSX 외 확장자는 스킵 (SPEC 7)
-
-    const [beforeParsed, afterParsed] = await Promise.all([parseSource(filePath, before), parseSource(filePath, after)]);
-    if (!beforeParsed || !afterParsed) return;
-
-    const beforeUnits = extractUnits(beforeParsed);
-    const afterUnits = extractUnits(afterParsed);
-    const changes = matchUnits(beforeUnits, afterUnits);
-    // edges는 "현재 상태" 스냅샷이라(SPEC 4.2) unit 본문 텍스트 변화가 없어도 다시 계산할 가치가
-    // 있다(예: 본문은 그대로인데 새 import가 추가돼 이전엔 미해석이던 참조가 풀리는 경우, 혹은
-    // 반대로 참조가 제거돼 기존 엣지가 stale해지는 경우) — changes.length가 0이어도 항상 실행한다.
-    const edges = extractEdges(afterParsed, filePath, afterUnits);
-
     repo.runInTransaction(() => {
       // code_unit_edges/code_unit_versions는 모두 code_units에 FK로 걸려있다(foreign_keys=ON).
       // edges는 afterUnits 전체(변경 안 된 유닛 포함)를 from/to로 참조할 수 있으므로, "changes에
       // 있는 유닛만" upsert하면 안 건드린 유닛을 참조하는 edge insert에서 FK 위반이 나 트랜잭션
       // 전체가 롤백된다(실제로 재현·확인된 버그) — 이 파일에 현재/직전에 존재했던 유닛 전부를
       // 먼저 upsert해 code_units row를 보장한다.
-      const allKnownUnits = new Map<string, CodeUnitCandidate>();
+      const allKnownUnits = new Map<string, UnitLike>();
       for (const unit of beforeUnits) allKnownUnits.set(unit.unitName, unit);
       for (const unit of afterUnits) allKnownUnits.set(unit.unitName, unit); // 존재하면 최신 정보로 덮어씀
       for (const unit of allKnownUnits.values()) {
@@ -223,6 +218,51 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
 
     // 구조도/타임라인이 이 커밋을 즉시 반영할 수 있도록 신호를 보낸다(SPEC 4.6 IPC push).
     emitter.emit('code-units-changed');
+  }
+
+  async function runAstDiff(
+    filePath: string,
+    before: string,
+    after: string,
+    toolEventId: string,
+    promptId: string | null,
+    timestamp: string
+  ) {
+    if (langForFilePath(filePath)) {
+      const [beforeParsed, afterParsed] = await Promise.all([parseSource(filePath, before), parseSource(filePath, after)]);
+      if (!beforeParsed || !afterParsed) return;
+
+      const beforeUnits = extractUnits(beforeParsed);
+      const afterUnits = extractUnits(afterParsed);
+      const changes = matchUnits(beforeUnits, afterUnits);
+      // edges는 "현재 상태" 스냅샷이라(SPEC 4.2) unit 본문 텍스트 변화가 없어도 다시 계산할 가치가
+      // 있다(예: 본문은 그대로인데 새 import가 추가돼 이전엔 미해석이던 참조가 풀리는 경우, 혹은
+      // 반대로 참조가 제거돼 기존 엣지가 stale해지는 경우) — changes.length가 0이어도 항상 실행한다.
+      const edges = extractEdges(afterParsed, filePath, afterUnits, config.projectPath);
+      persistUnitsAndEdges(filePath, beforeUnits, afterUnits, changes, edges, toolEventId, promptId, timestamp);
+      return;
+    }
+
+    if (!isCtagsCandidate(filePath)) return; // 코드로 보기 어려운 확장자(설정/문서/자산 등) — 스킵
+
+    // ctags 경로: tree-sitter grammar가 없는 언어 전부(Go/Java/... — SPEC 7 확장, Python은
+    // tree-sitter 경로로 이관됨). 정의(함수/클래스)만 나오고 엣지는 없다(참조/호출 해석
+    // 불가 — ctags-extractor.ts 상단 주석 참조).
+    const [beforeCtags, afterCtags] = await Promise.all([
+      extractWithCtags(filePath, before),
+      extractWithCtags(filePath, after),
+    ]);
+    const changes = matchUnits(beforeCtags.units, afterCtags.units);
+    persistUnitsAndEdges(
+      filePath,
+      beforeCtags.units,
+      afterCtags.units,
+      changes,
+      afterCtags.edges,
+      toolEventId,
+      promptId,
+      timestamp
+    );
   }
 
   async function handleTranscriptEvent(event: TranscriptEvent) {
