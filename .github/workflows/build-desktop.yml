@@ -1,0 +1,74 @@
+name: Build Desktop Apps
+
+# 수동 트리거 전용 — 태그/푸시마다 자동으로 데스크톱 빌드+릴리스를 만들 필요는 없고,
+# 필요할 때(README 다운로드 링크 갱신 등)만 명시적으로 돌린다.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: build:mac
+            artifact: mac
+          - os: windows-latest
+            script: build:win
+            artifact: win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+
+      # 배포판은 진짜 OpenAI/Gemini 키를 절대 갖지 않는다(src/ai/createAIProvider.ts) —
+      # electron-builder.yml의 extraResources가 .env.production을 요구하는데, 이 파일은
+      # gitignore 대상이라 CI 체크아웃엔 없다. .env.production.example(빈 값 placeholder)을
+      # 그대로 복사해 빌드만 통과시킨다 — 이 공개 릴리스엔 프록시 토큰도 안 채워서(누구나
+      # 받을 수 있는 빌드에 프록시 접근권을 실어 보내지 않기 위함), AI 기능은
+      # MockAIProvider로 자동 대체된 채로 배포된다. 실제 AI 연동이 필요하면 소스에서
+      # 직접 빌드해 자기 키를 쓰거나 .env.production을 채워 넣어야 한다.
+      - name: Create placeholder .env.production (no real credentials in public build)
+        shell: bash
+        run: cp .env.production.example .env.production
+
+      - run: npm run ${{ matrix.script }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: factcoding-${{ matrix.artifact }}
+          path: |
+            dist/*.dmg
+            dist/*.exe
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist-artifacts
+
+      - name: Create GitHub release with build artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="v0.1.0-build.${{ github.run_number }}"
+          gh release create "$TAG" \
+            dist-artifacts/factcoding-mac/*.dmg \
+            dist-artifacts/factcoding-win/*.exe \
+            --repo "${{ github.repository }}" \
+            --title "Factcoding $TAG" \
+            --notes "GitHub Actions로 자동 빌드된 데스크톱 앱입니다. 서명되지 않은 빌드라 macOS/Windows에서 실행 시 보안 경고가 뜰 수 있습니다(macOS: 우클릭 후 '열기', Windows: '추가 정보' → '실행'). AI 기능은 이 공개 빌드에 진짜 API 키가 없어 기본적으로 비활성 상태입니다."
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
