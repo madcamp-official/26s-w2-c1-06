@@ -12,6 +12,12 @@ asarUnpack:
 # 파이프라인 런타임 자산 — main 번들 밖에서 파일로 직접 읽어야 하는 것들
 # (src/app/main/index.ts의 packaged 분기 pipelineAssets 경로와 짝을 이룸)
 extraResources:
+  # 배포된 앱이 OpenAI를 호출할 때 쓰는 프록시 토큰/URL(진짜 OpenAI 키 아님, src/ai/
+  # createAIProvider.ts 참조) — 리포에는 안 올라가는 로컬 파일(.gitignore 대상)이라
+  # 빌드하는 사람의 머신에 이 파일이 있어야 AI 기능이 동작한다(없으면 MockAIProvider로
+  # 자동 폴백, 빌드 자체는 실패하지 않음). 값은 .env.production.example 참조.
+  - from: .env.production
+    to: .env.production
   - from: src/pipeline/ast-diff/grammars
     to: pipeline/grammars
   - from: src/pipeline/hooks/session-event-hook.mjs

@@ -31,7 +31,15 @@ import { startLectureNoteWorker } from './lecture-note-worker'
 import { startStepWorker } from './step-worker'
 import { createContextBundleLoader, createSessionTraceLoader } from './session-trace'
 
-loadEnv({ path: join(app.getAppPath(), '.env'), quiet: true })
+// dev는 .env(진짜 OpenAI/Gemini 키, gitignore 대상)를, 패키징된 빌드는 .env.production
+// (프록시 토큰/URL만 있음, 마찬가지로 gitignore 대상이지만 electron-builder.yml의
+// extraResources로 배포 산출물에는 번들됨 — createAIProvider.ts 참조)을 읽는다. 진짜
+// OpenAI 키가 든 .env는 절대 배포 빌드에 들어가지 않는다(electron-builder.yml files에도
+// 없음).
+loadEnv({
+  path: app.isPackaged ? join(process.resourcesPath, '.env.production') : join(app.getAppPath(), '.env'),
+  quiet: true
+})
 
 // asar로 패키징되면 앱 리소스 경로가 읽기 전용이라 better-sqlite3가 그 안에
 // .db 파일을 쓸 수 없다 (SPEC 4.6) — 패키징된 빌드에서는 사용자별 쓰기 가능

@@ -75,8 +75,11 @@ export class OpenAIProvider implements AIProvider {
   // 모델별 "이 시각 이후에 다시 시도해도 됨" 타임스탬프. 프로세스 수명 동안 유지된다.
   private readonly modelAvailableAt = new Map<string, number>()
 
-  constructor(apiKey: string) {
-    this.client = new OpenAI({ apiKey })
+  // baseURL이 있으면(패키징된 배포본) 진짜 OpenAI가 아니라 Cloudflare Worker 프록시로
+  // 보낸다 — apiKey는 그 경우 프록시 인증용 토큰일 뿐, 진짜 OpenAI 키가 아니다
+  // (createAIProvider.ts 참조, worker/ 디렉토리가 그 프록시 구현).
+  constructor(apiKey: string, baseURL?: string) {
+    this.client = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) })
   }
 
   async explainTurn(prompt: Prompt, events: ToolEvent[], skillLevel: SkillLevel): Promise<TurnCaption> {

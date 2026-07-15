@@ -81,7 +81,13 @@ export class GeminiProvider implements AIProvider {
   // 모델별 "이 시각 이후에 다시 시도해도 됨" 타임스탬프. 프로세스 수명 동안 유지된다.
   private readonly modelAvailableAt = new Map<string, number>()
 
-  constructor(private readonly keyPool: GeminiKeyPool) {}
+  // baseUrl이 있으면(패키징된 배포본) 진짜 Gemini가 아니라 Vercel 프록시로 보낸다 —
+  // keyPool이 들고 있는 값은 그 경우 프록시 전용 토큰들이지, 진짜 Gemini 키가 아니다
+  // (createAIProvider.ts 참조, vercel-proxy/api/gemini/가 실제 프록시 구현).
+  constructor(
+    private readonly keyPool: GeminiKeyPool,
+    private readonly baseUrl?: string
+  ) {}
 
   async explainTurn(prompt: Prompt, events: ToolEvent[], skillLevel: SkillLevel): Promise<TurnCaption> {
     if (events.length === 0) return { promptId: prompt.id, caption: '', conceptTags: [] }
@@ -214,7 +220,10 @@ export class GeminiProvider implements AIProvider {
   private clientFor(apiKey: string): GoogleGenAI {
     let client = this.clients.get(apiKey)
     if (!client) {
-      client = new GoogleGenAI({ apiKey })
+      client = new GoogleGenAI({
+        apiKey,
+        ...(this.baseUrl ? { httpOptions: { baseUrl: this.baseUrl } } : {})
+      })
       this.clients.set(apiKey, client)
     }
     return client

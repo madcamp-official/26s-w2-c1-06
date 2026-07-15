@@ -6,6 +6,7 @@ db/*.db-shm
 db/*.db-wal
 *.db-journal
 .env
+.env.production
 *.local
 *.tsbuildinfo
 
