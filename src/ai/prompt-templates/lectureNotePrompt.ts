@@ -26,6 +26,7 @@ export function buildLectureNotePrompt(trace: SessionTrace, skillLevel: SkillLev
     'You are writing a end-of-session Markdown lecture note for a learner who just watched an AI coding agent work, so they can review what happened later.',
     SKILL_TONE_INSTRUCTIONS[skillLevel],
     '다음 섹션을 포함하는 한국어 Markdown 문서를 작성해줘: "## 다룬 개념", "## 변경된 코드 유닛별 요약", "## 다음 학습 추천".',
+    '결과는 Markdown 텍스트 자체만 출력해줘 — ```markdown 이나 ``` 같은 코드 펜스로 전체를 감싸지 마.',
     '세션에서 사용자가 요청한 턴들:',
     turnLines || '(없음)',
     '에이전트가 수행한 작업들:',

@@ -33,7 +33,7 @@ import { useSteps } from './hooks/useSteps'
 import { useTurnDetail } from './hooks/useTurnDetail'
 import { useUnitTimeline } from './hooks/useUnitTimeline'
 import type { OnboardingProfile, Project, SkillLevel } from '@shared/types'
-import { formatRelativeTime, stripSystemContextTags } from '@shared/format'
+import { formatRelativeTime, stripMarkdownFence, stripSystemContextTags } from '@shared/format'
 import { SKILL_LEVEL_LABEL } from '@shared/skillProfile'
 
 type ViewKey = 'projects' | 'project'
@@ -75,7 +75,9 @@ function pathLeaf(path: string): string {
 }
 
 function noteTitle(markdown: string): string {
-  const line = markdown.split('\n').find((l) => l.trim().length > 0) ?? '학습 노트'
+  const line = stripMarkdownFence(markdown)
+    .split('\n')
+    .find((l) => l.trim().length > 0) ?? '학습 노트'
   return line.replace(/^#+\s*/, '').slice(0, 44)
 }
 
@@ -125,7 +127,7 @@ function App() {
   // 스텝 단위로 채워진다. liveStatus는 "지금 하는 중" 한 줄, DB 폴링보다 훨씬 빠르다.
   const steps = useSteps(sessionId, skillLevel)
   const liveStatus = useLiveStatus()
-  const { notes, regenerate } = useLectureNotes(currentProjectId)
+  const { notes } = useLectureNotes(currentProjectId)
   const { needsOnboarding, complete } = useOnboarding(setSkillLevel)
   // 사이드바 "설정"에서 온보딩 위저드를 다시 열어 난이도를 조정할 때 — 온보딩 최초
   // 완료 때와 동일하게 난이도를 적용하고 원본 프로필을 저장해, 다음에 또 열면 방금
@@ -216,14 +218,20 @@ function App() {
     : []
   const currentTurnStepCount = currentTurnSteps.filter((s) => !s.inProgress).length
   const currentTurnHasActiveStep = currentTurnSteps.some((s) => s.inProgress)
-  // "이 턴은 끝났다"는 completed_at(Stop 훅/idle 완료 처리, 프롬프트별로 정확히 스코프됨)
-  // 하나만 근거로 삼는다. 한때 liveStatus.idle(step-worker가 전역으로 계산하는 "지금 아무
-  // 활동도 없다" 신호)도 같이 썼는데, 이건 세션 전체에서 가장 최근 스텝 기준이라 새 턴이
-  // 막 시작해 아직 이 턴의 스텝이 하나도 없는 순간엔 "직전 턴의 마지막 스텝이 idle"이라는
-  // 이유만으로 새 턴을 "완료"로 잘못 판정했다 — 그래서 시작하자마자 100%로 찍혔다가 첫
-  // 스텝이 잡히면 다시 낮은 값으로 리셋되는 버그가 있었다. completed_at은 prompts 테이블의
-  // 해당 행에만 찍히므로 이런 오판이 구조적으로 불가능하다.
-  const currentTurnDone = currentTurn != null && currentTurnCompleted
+  // "이 턴은 끝났다"는 completed_at(Stop 훅/90초 idle 폴백)을 우선 근거로 삼되, Stop 훅이
+  // 안 온 세션(흔하다 — 관찰 시작 전에 이미 열려 있던 Claude Code 세션은 훅이 하나도 안
+  // 붙는다)에서도 90초씩 기다리지 않도록 liveStatus.idle(step-worker가 1.5초 주기로
+  // 갱신하는 "지금 아무 도구도 안 쓰고 있다" 신호, idle 판정까지 45초)을 보조로 쓴다.
+  // liveStatus는 세션 전체에서 가장 최근 스텝 하나만 보고 계산되는 전역 신호라 그대로
+  // 쓰면 안 된다 — 새 턴이 막 시작해 이 턴의 스텝이 아직 하나도 없는 순간엔 "직전 턴의
+  // 마지막 스텝이 idle"이라는 이유만으로 새 턴을 완료로 잘못 판정해, 시작하자마자 100%로
+  // 찍혔다가 첫 스텝이 잡히면 낮은 값으로 리셋되는 버그가 있었다. 그래서 이 턴 자신의
+  // 스텝이 실제로 하나라도 생긴 뒤에만(currentTurnSteps.length > 0) liveStatus.idle을
+  // 신뢰한다 — 그 시점부턴 세션의 "가장 최근 스텝"이 곧 이 턴의 스텝이므로(다음 턴은
+  // 아직 없음) 안전하다. 캡션("직전 실행 과정") 생성은 completed_at 하나만 보고 뒤늦게
+  // 따라오므로, 이 빠른 신호로 100%를 채워도 캡션 타이밍과는 무관하게 동작한다.
+  const currentTurnLiveIdle = currentTurnSteps.length > 0 && liveStatus.idle
+  const currentTurnDone = currentTurn != null && (currentTurnCompleted || currentTurnLiveIdle)
   const currentTurnProgressPercent = (() => {
     if (!monitoring.isMonitoring || currentTurn == null) return 0
     if (currentTurnDone) return 100
@@ -492,7 +500,6 @@ function App() {
                 filesTouched={filesTouched}
                 notes={notes}
                 recentNotes={recentNotes}
-                onRegenerateNote={regenerate}
                 qna={qna}
                 qnaOpen={qnaOpen}
                 onToggleQna={() => setQnaOpen((prev) => !prev)}
@@ -539,7 +546,6 @@ interface ProjectPageProps {
   filesTouched: Array<[string, number]>
   notes: ReturnType<typeof useLectureNotes>['notes']
   recentNotes: ReturnType<typeof useLectureNotes>['notes']
-  onRegenerateNote: ReturnType<typeof useLectureNotes>['regenerate']
   qna: ReturnType<typeof useQna>
   qnaOpen: boolean
   onToggleQna: () => void
@@ -580,7 +586,6 @@ function ProjectPage({
   filesTouched,
   notes,
   recentNotes,
-  onRegenerateNote,
   qna,
   qnaOpen,
   onToggleQna
@@ -855,7 +860,6 @@ function ProjectPage({
       {activeTab === 'notes' && (
         <LectureNotesViewer
           notes={notes}
-          onRegenerate={onRegenerateNote}
           justCompletedSessionId={justCompletedSessionId}
           onContinue={onContinueMonitoring}
           continuePending={monitoring.pending}

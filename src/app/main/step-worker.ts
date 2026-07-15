@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3'
 import type { AIProvider, StepInput } from '@ai/types'
 import { errorDetailOf, pickCodeCandidate, summarizeRawPayload } from '@ai/prompt-templates/stepCodeExtract'
 import type { AssistantNote, SkillLevel, ToolEvent } from '@shared/types'
-import { groupIntoSteps, STEP_IDLE_GAP_MS, type Step } from '@shared/steps'
+import { groupIntoSteps, STEP_IDLE_GAP_MS, TURN_IDLE_GAP_MS, type Step } from '@shared/steps'
 import type { LiveStatus } from '@shared/stepProgress'
 
 // 활동 탭 "바뀐 구조와 변경사항"에 실시간으로 쌓이는 진행 로그 — 턴이 끝나길 기다리는
@@ -16,11 +16,6 @@ const FAILURE_COOLDOWN_MS = 60_000
 // 기다리면 실시간감이 사라지므로, 훨씬 빠른 별도 주기로 로컬 규칙만 돌린다.
 const LIVE_STATUS_POLL_INTERVAL_MS = 1500
 const LIVE_STATUS_ARG_MAX_LENGTH = 50
-// "지금 활동 중인가"(liveStatus.idle) 판정 전용 유휴 임계값. 스텝 경계(STEP_IDLE_GAP_MS,
-// 90초)나 완료 처리(completed_at)와 달리 이건 순수 화면 표시용 신호라, Stop 훅이 못 와도
-// (이 환경에선 자주 그렇다) 90초를 기다리지 않고 훨씬 빨리 "손을 뗌"을 알아채게 짧게 잡는다.
-// 이 값을 줄여도 스텝을 나누는 기준(groupIntoSteps)이나 요약/완료 처리는 전혀 바뀌지 않는다.
-const LIVE_IDLE_GAP_MS = 45_000
 
 interface StepRow {
   id: string
@@ -332,7 +327,7 @@ export function startStepWorker(
       session.ended_at != null ||
       steps.length === 0 ||
       lastStepTurnCompleted ||
-      isLastStepStale(lastStep, LIVE_IDLE_GAP_MS)
+      isLastStepStale(lastStep, TURN_IDLE_GAP_MS)
         ? null
         : lastStep
     if (!inProgress) return { text: '', idle: true }

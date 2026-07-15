@@ -1,13 +1,11 @@
-import { useState } from 'react'
 import Markdown from 'react-markdown'
 import { BookOpen, Play, RefreshCw, Sparkles } from 'lucide-react'
-import type { LectureNote, SkillLevel } from '@shared/types'
-import { formatTime } from '@shared/format'
-import { SKILL_LEVEL_LABEL, SKILL_LEVEL_ORDER } from '@shared/skillProfile'
+import type { LectureNote } from '@shared/types'
+import { formatTime, stripMarkdownFence } from '@shared/format'
+import { SKILL_LEVEL_LABEL } from '@shared/skillProfile'
 
 interface LectureNotesViewerProps {
   notes: LectureNote[]
-  onRegenerate: (sessionId: string, skillLevel: SkillLevel) => Promise<void>
   // "오늘은 여기까지"로 방금 끝낸 세션의 id — 있으면 그 세션의 요약을 맨 위에 강조
   // 배너로 보여주고 "계속하기"를 띄운다. 노트 탭에 그냥 들어온 경우(이 값이 null)엔
   // 기존과 동일하게 세션별 목록만 보여준다.
@@ -17,7 +15,6 @@ interface LectureNotesViewerProps {
 }
 
 const SKILL_LABEL = SKILL_LEVEL_LABEL
-const ALL_LEVELS = SKILL_LEVEL_ORDER
 
 interface SessionGroup {
   sessionId: string
@@ -39,52 +36,11 @@ function groupBySession(notes: LectureNote[]): SessionGroup[] {
   return order.map((sessionId) => ({ sessionId, notes: bySession.get(sessionId)! }))
 }
 
-function RegenerateButtons({
-  group,
-  onRegenerate
-}: {
-  group: SessionGroup
-  onRegenerate: (sessionId: string, skillLevel: SkillLevel) => Promise<void>
-}) {
-  const [pendingKey, setPendingKey] = useState<string | null>(null)
-  const presentLevels = new Set(group.notes.map((note) => note.skill_level))
-
-  return (
-    <div className="ml-auto flex gap-1.5">
-      {ALL_LEVELS.filter((level) => !presentLevels.has(level)).map((level) => {
-        const key = `${group.sessionId}:${level}`
-        const pending = pendingKey === key
-        return (
-          <button
-            key={level}
-            type="button"
-            disabled={pending}
-            onClick={async () => {
-              setPendingKey(key)
-              try {
-                await onRegenerate(group.sessionId, level)
-              } finally {
-                setPendingKey(null)
-              }
-            }}
-            className="flex items-center gap-1.5 rounded-md border border-border bg-[#f6f5f1] px-2.5 py-1.5 text-[11px] text-[#6d7069] transition hover:bg-[#f1f0eb] hover:text-[#245248] disabled:opacity-50"
-          >
-            <RefreshCw size={11} className={pending ? 'animate-spin' : undefined} />
-            {pending ? '생성 중…' : `${SKILL_LABEL[level]}로도 보기`}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 function NoteGroupSection({
   group,
-  onRegenerate,
   highlighted
 }: {
   group: SessionGroup
-  onRegenerate: (sessionId: string, skillLevel: SkillLevel) => Promise<void>
   highlighted?: boolean
 }) {
   return (
@@ -104,7 +60,6 @@ function NoteGroupSection({
             SESSION / {group.sessionId.slice(0, 8)}
           </span>
         )}
-        <RegenerateButtons group={group} onRegenerate={onRegenerate} />
       </div>
 
       <div className="divide-y divide-border">
@@ -117,7 +72,7 @@ function NoteGroupSection({
               <span className="font-mono text-[10px] text-[#9a9a92]">{formatTime(note.created_at)}</span>
             </header>
             <div className="markdown-body">
-              <Markdown>{note.markdown}</Markdown>
+              <Markdown>{stripMarkdownFence(note.markdown)}</Markdown>
             </div>
           </article>
         ))}
@@ -147,12 +102,9 @@ function ContinueButton({
 }
 
 // SPEC 4.5 강의노트 뷰어: lecture_notes를 세션별로 묶어 표시, Markdown 렌더.
-// SPEC 5.1: "다른 난이도로 다시 보고 싶으면 뷰어에서 재생성 요청(온디맨드)" —
-// 세션마다 아직 없는 난이도를 생성 요청할 수 있는 버튼을 둔다.
 // 세션이 아직 끝나지 않았으면(ended_at 미기록) 비어있는 게 정상 상태.
 export function LectureNotesViewer({
   notes,
-  onRegenerate,
   justCompletedSessionId,
   onContinue,
   continuePending = false
@@ -172,7 +124,7 @@ export function LectureNotesViewer({
   const completedBanner = justCompletedSessionId && (
     <section className="overflow-hidden rounded-xl border border-[#4f9c84] bg-card shadow-[0_3px_14px_rgba(42,46,38,.06)]">
       {highlightGroup ? (
-        <NoteGroupSection group={highlightGroup} onRegenerate={onRegenerate} highlighted />
+        <NoteGroupSection group={highlightGroup} highlighted />
       ) : (
         <div className="flex flex-wrap items-center gap-3 px-5 py-4">
           <span className="flex items-center gap-1.5 rounded-md bg-[#eaf4ef] px-2 py-0.5 text-[11px] font-semibold text-[#245248]">
@@ -210,7 +162,7 @@ export function LectureNotesViewer({
     <div className="space-y-5">
       {completedBanner}
       {restGroups.map((group) => (
-        <NoteGroupSection key={group.sessionId} group={group} onRegenerate={onRegenerate} />
+        <NoteGroupSection key={group.sessionId} group={group} />
       ))}
     </div>
   )

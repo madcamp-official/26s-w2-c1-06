@@ -7,6 +7,13 @@ import type { AssistantNote, ToolEvent } from './types'
 // 들어온 참고 텍스트일 뿐, 경계가 아니다.
 
 export const STEP_IDLE_GAP_MS = 90_000
+// "이 턴/스텝이 끝났다"고 화면에 빠르게 반영하기 위한 유휴 임계값 — Stop 훅이 못
+// 왔을 때(흔하다: 관찰 시작 전에 이미 열려 있던 Claude Code 세션은 훅이 아예 안 붙는다)
+// STEP_IDLE_GAP_MS(90초)까지 기다리면 에이전트가 실제로 멈춘 뒤에도 한참 "실행
+// 중"/"요약 생성 중…"으로 보인다. STEP_IDLE_GAP_MS 자체(스텝을 나누는 경계, 90초)는
+// 그대로 두고, "완료로 간주해도 되는가"를 판단하는 곳들(step-worker의 라이브 상태,
+// caption-worker의 턴 완료 처리/캡션 대상 판정)만 이 더 짧은 값을 쓴다.
+export const TURN_IDLE_GAP_MS = 45_000
 export const MAX_EVENTS_PER_STEP = 6
 // 유휴시간(90초)이나 개수(6개) cap에 걸리기 전이라도, 에이전트가 쉬지 않고 계속
 // 이것저것 빠르게 처리하면 스텝 하나가 너무 오래(몇 분씩) 안 닫혀서 실시간 진행
