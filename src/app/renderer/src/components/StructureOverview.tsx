@@ -89,11 +89,28 @@ export function StructureOverview({
   // 골라야(격자 전체의 가로:세로가 컨테이너 가로:세로에 가까워야) 어느 한쪽만 남는 여백 없이
   // 같은 축소율에서 더 크게 보이고, 필요한 축소율 자체도 더 완만해진다.
   const nodesPerRow = useMemo(() => {
-    if (containerSize.width <= 0 || containerSize.height <= 0 || units.length === 0) return DEFAULT_NODES_PER_ROW
+    // width/height <= 0 가드만으로는 부족하다 — NaN은 모든 <=/> 비교에서 false를 내서
+    // 이 가드를 그냥 통과한다. ResizeObserver/clientWidth가 언마운트·리사이즈 레이스
+    // 등으로 NaN을 준 적이 실제로 있었는데, 그러면 아래 sqrt가 NaN을 내고
+    // Math.max(1, Math.min(...))도 NaN이 하나만 섞이면 무조건 NaN을 반환한다(1로
+    // 안 떨어짐) — 그 NaN이 노드 좌표까지 퍼져 React Flow가 "Invalid array length"로
+    // 죽는 실제 크래시가 있었다. Number.isFinite로 NaN/Infinity까지 확실히 걸러낸다.
+    if (
+      !Number.isFinite(containerSize.width) ||
+      !Number.isFinite(containerSize.height) ||
+      containerSize.width <= 0 ||
+      containerSize.height <= 0 ||
+      units.length === 0
+    ) {
+      return DEFAULT_NODES_PER_ROW
+    }
     const idealCols = Math.round(
       Math.sqrt((units.length * LAYER_HEIGHT * containerSize.width) / (COLUMN_WIDTH * containerSize.height))
     )
-    return Math.max(1, Math.min(units.length, idealCols))
+    // 위 가드를 통과했어도 만일을 대비해 최종값이 유한한 양의 정수가 아니면 기본값으로
+    // 폴백한다 — nodesPerRow가 NaN/0/Infinity로 새는 경로를 완전히 차단한다.
+    const clamped = Math.max(1, Math.min(units.length, idealCols))
+    return Number.isFinite(clamped) ? clamped : DEFAULT_NODES_PER_ROW
   }, [containerSize, units.length])
 
   const { nodes, flowEdges } = useMemo(() => {

@@ -833,9 +833,6 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', () => {
-  captionWorker.stop()
-  stopLectureNoteWorker()
-  stepWorker.stop()
   void (async () => {
     try {
       // "완료" 버튼을 안 누르고 창을 그냥 닫아도(Cmd+Q 등) 지금 관찰 중이던 세션을
@@ -847,7 +844,23 @@ app.on('window-all-closed', () => {
     } catch (err) {
       console.error('[pipeline] stop failed:', err)
     }
-    db.close()
+    // macOS는 창을 다 닫아도 앱 프로세스는 dock에 남아있다가 activate(dock 아이콘
+    // 클릭 등)로 새 창을 다시 띄우는 게 표준 동작이다 — 여기서 db.close()까지 해버리면
+    // 그 재활성화된 새 창의 모든 IPC 호출이 "database connection is not open"으로
+    // 영원히 실패하는 실제 크래시가 있었다(재시작 전엔 절대 안 풀림). db/워커 정리는
+    // 진짜로 프로세스가 끝나는 will-quit에서만 하고, 여기서는 비-macOS일 때 quit()을
+    // 요청하는 것까지만 한다.
     if (process.platform !== 'darwin') app.quit()
   })()
+})
+
+// 프로세스가 실제로 종료되기 직전 정확히 한 번 온다 — window-all-closed와 달리
+// macOS에서 창만 닫혔을 뿐 앱이 계속 떠 있는 경우엔 오지 않는다(그래서 db가 계속
+// 열려 있어야 하는 위 macOS 케이스와 안전하게 분리된다). Cmd+Q, 비-macOS의
+// app.quit(), 시스템 로그아웃 등 실제 종료 경로 전부 여기로 모인다.
+app.on('will-quit', () => {
+  captionWorker.stop()
+  stopLectureNoteWorker()
+  stepWorker.stop()
+  db.close()
 })
