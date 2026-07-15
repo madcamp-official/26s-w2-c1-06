@@ -290,7 +290,10 @@ function App() {
   // 캡션("직전 실행 과정") 생성은 completed_at 하나만 보고 뒤늦게 따라오므로, 이 빠른
   // 신호로 100%를 채워도 캡션 타이밍과는 무관하게 동작한다.
   const currentTurnLiveIdle =
-    !liveStatus.hooksAlive && currentTurnSteps.length > 0 && liveStatus.idle
+    !liveStatus.hooksAlive &&
+    currentTurnSteps.length > 0 &&
+    liveStatus.turnId === currentTurn?.id &&
+    liveStatus.idle
   const currentTurnDone = currentTurn != null && (currentTurnCompleted || currentTurnLiveIdle)
   // 완료 전 진행률은 같은 턴 안에서 절대 뒤로 가지 않게 클램프한다 — 스텝 경계는 새
   // 이벤트가 붙으면 재계산되는 파생값이라, 닫힌 줄 알았던 마지막 스텝이 다시 진행 중으로

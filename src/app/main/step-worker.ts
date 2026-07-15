@@ -303,7 +303,7 @@ export function startStepWorker(
     const session = getLatestSession.get() as
       | { id: string; ended_at: string | null; hooks_alive: number }
       | undefined
-    if (!session) return { text: '', idle: true, hooksAlive: false }
+    if (!session) return { text: '', idle: true, hooksAlive: false, turnId: null }
     // 훅이 붙은 세션인지 렌더러에 알려준다 — App은 훅 세션에선 idle을 완료 판정
     // 폴백으로 쓰지 않는다(Stop 훅의 completed_at이 즉시 오므로 추측이 필요 없고,
     // 긴 thinking 구간을 완료로 오판해 진행바가 100%로 튀는 원인만 된다).
@@ -317,6 +317,7 @@ export function startStepWorker(
       (getCompletedPromptIds.all({ session_id: session.id }) as { id: string }[]).map((r) => r.id)
     )
     const lastStepTurnCompleted = lastStep?.promptId != null && completedPromptIds.has(lastStep.promptId)
+    const turnId = lastStep?.promptId ?? null
     const inProgress =
       session.ended_at != null ||
       steps.length === 0 ||
@@ -324,7 +325,7 @@ export function startStepWorker(
       isQuietSince(lastStep, notes, TURN_IDLE_GAP_MS)
         ? null
         : lastStep
-    if (!inProgress) return { text: '', idle: true, hooksAlive }
+    if (!inProgress) return { text: '', idle: true, hooksAlive, turnId }
 
     const lastEvent = inProgress.events[inProgress.events.length - 1]
     if (lastEvent) {
@@ -334,12 +335,12 @@ export function startStepWorker(
           const argSummary = summarizeRawPayload(lastEvent.tool_name, lastEvent.raw_payload)
           return argSummary ? truncateForLiveStatus(argSummary) : '파일 미지정'
         })()
-      return { text: `${lastEvent.tool_name} · ${target}`, idle: false, hooksAlive }
+      return { text: `${lastEvent.tool_name} · ${target}`, idle: false, hooksAlive, turnId }
     }
     if (inProgress.note) {
-      return { text: `${fallbackSummaryFromNote(inProgress.note.text)} 준비 중`, idle: false, hooksAlive }
+      return { text: `${fallbackSummaryFromNote(inProgress.note.text)} 준비 중`, idle: false, hooksAlive, turnId }
     }
-    return { text: '', idle: true, hooksAlive }
+    return { text: '', idle: true, hooksAlive, turnId }
   }
 
   let lastLiveKey: string | null = null

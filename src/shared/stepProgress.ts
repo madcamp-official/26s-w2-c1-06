@@ -10,4 +10,6 @@ export interface LiveStatus {
   // 폴백으로 쓰지 않아야 한다(긴 thinking 구간을 완료로 오판해 진행바가 100%로
   // 튀었다 되돌아오는 플리커의 원인이 된다).
   hooksAlive: boolean
+  // 이 상태가 어느 턴(prompt)에 대한 것인지 식별하기 위한 ID
+  turnId?: string | null
 }

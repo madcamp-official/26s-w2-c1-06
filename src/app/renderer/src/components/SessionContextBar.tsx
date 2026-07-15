@@ -23,7 +23,11 @@ export function SessionContextBar({ prompts }: SessionContextBarProps) {
       <summary className="flex cursor-pointer list-none items-center gap-2.5 px-4 py-3 text-[12px] text-[#6d7069] transition hover:bg-[#f1f0eb] [&::-webkit-details-marker]:hidden">
         <ListTodo size={14} className="text-[#5b8fae]" />
         <span className="font-medium text-[#373832]">이번 프롬프트의 계획</span>
-        <span className="font-mono text-[10px] text-[#6d7069]">PLAN · PROMPT {currentTurn.turn_index + 1}</span>
+        {/* currentTurn.turn_index가 아니라 prompts.length를 쓴다 — turn_index는 "완료 →
+            시작하기"로 재개된 세션마다 0부터 다시 세는 DB 카운터라, 재개 직후 첫 프롬프트도
+            "PROMPT 1"로 잘못 표시된다. prompts는 재개 사슬 전체를 시간순으로 담고 있으므로
+            (main/index.ts getPromptsBySession), 마지막 원소의 실제 순번은 배열 길이 그대로다. */}
+        <span className="font-mono text-[10px] text-[#6d7069]">PLAN · PROMPT {prompts.length}</span>
         <ChevronDown size={14} className="ml-auto text-[#6d7069] transition group-open:rotate-180" />
       </summary>
       <div className="markdown-body border-t border-border bg-[#f6f5f1] px-4 py-3">

@@ -44,9 +44,15 @@ export function buildTurnList(prompts: Prompt[], events: ToolEvent[]): TurnListI
   const codeTurns = prompts.filter((p) => (countByPrompt.get(p.id) ?? 0) > 0)
   const lastPromptId = codeTurns.length > 0 ? codeTurns[codeTurns.length - 1].id : null
 
-  const items: TurnListItem[] = codeTurns.map((p) => ({
+  // 화면 표시용 턴 번호는 DB의 prompts.turn_index를 그대로 쓰지 않고 이 목록 안에서의
+  // 위치로 다시 매긴다 — turn_index는 "재개 사슬"의 논리 세션마다 0부터 다시 세는
+  // 카운터라(pipeline/index.ts turnIndexBySession), "완료 → 시작하기"로 세션이 갈렸을
+  // 때 그대로 쓰면 "프롬프트 1"이 두 번 나오는 등 번호가 꼬인다. prompts 배열은 이미
+  // 시간순으로 정렬돼 들어오므로(main/index.ts의 getPromptsBySession, created_at ASC)
+  // 여기서의 인덱스가 곧 사슬 전체를 통틀은 올바른 순번이다.
+  const items: TurnListItem[] = codeTurns.map((p, index) => ({
     turnId: p.id,
-    turnIndex: p.turn_index,
+    turnIndex: index,
     // 원본 user_text는 <ide_opened_file> 등 자동 삽입 컨텍스트 태그를 그대로 담고
     // 있어서(캡션 생성 시엔 필요) 화면 제목으로 쓸 땐 사람이 실제로 쓴 부분만 남긴다.
     userText: stripSystemContextTags(p.user_text) || null,

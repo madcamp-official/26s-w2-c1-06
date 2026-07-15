@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { config as loadEnv } from 'dotenv'
 import { join } from 'node:path'
 import { applySchema, openDatabase } from '@db/connection'
 import { createAIProvider } from '@ai/createAIProvider'
+import { getClaudeProjectDir } from '@pipeline/observation/session-locator'
 import type {
   AiExplanation,
   AssistantNote,
@@ -52,15 +53,48 @@ const schemaPath = join(app.getAppPath(), 'db', 'schema.sql')
 const db = openDatabase(dbPath)
 applySchema(db, schemaPath)
 
-// 비정상 종료(강제 종료, 크래시, dev 서버 재시작 등)로 "완료"를 못 누르고 끝난 세션은
-// ended_at이 영원히 NULL로 남는다 — 이 프로세스가 막 시작된 지금 시점엔 아직 어떤
-// pipeline도 연 적이 없으므로, 이 시점에 ended_at이 NULL인 세션은 전부 이전 실행의
-// 잔재다. 그대로 두면 caption-worker/lecture-note-worker가 "다음 턴 시작 또는 세션
-// 종료" 조건을 영원히 못 만족해 마지막 턴 캡션과 강의노트가 영구히 안 생긴다 — 앱을
-// 새로 띄울 때마다 한 번 정리해 다음 턴 시작을 기다리지 않고 바로 완료 처리한다.
-db.prepare(
-  `UPDATE sessions SET ended_at = @ended_at WHERE ended_at IS NULL`
-).run({ ended_at: new Date().toISOString() })
+// 비정상 종료(강제 종료, 크래시)로 "완료"를 못 누르고 끝난 세션은 ended_at이 영원히
+// NULL로 남는다 — 방치하면 caption-worker/lecture-note-worker가 "다음 턴 시작 또는
+// 세션 종료" 조건을 영원히 못 만족해 마지막 턴 캡션과 강의노트가 영구히 안 생긴다.
+// 예전엔 "이 프로세스가 막 시작된 지금 시점에 ended_at이 NULL이면 전부 이전 실행의
+// 잔재"로 보고 무조건 끝냈는데, 이 가정이 틀렸다 — 앱을 재기동(dev 서버 재시작 등)해도
+// 사용자가 같은 터미널에서 Claude Code 대화를 계속 이어가고 있으면(JSONL 파일이 계속
+// 자라는 중) 그 세션은 실제로 안 끝난 게 맞다. 강제로 끝내버리면 파이프라인이 재기동
+// 후 같은 파일을 다시 발견했을 때 "이미 종료된 세션의 재개"로 오판해 새 논리 세션을
+// 발급하고, 그 순간부터 활동 탭(항상 최신 세션 하나만 보여줌)에서 이전 프롬프트들이
+// 전부 사라져버리는 실제 버그가 있었다(개발 중 앱을 자주 재기동하면 진행 중인 세션이
+// 계속 쪼개짐 — 사용자에게 세션이 잘렸다고 보고받아 재현·확인함). 그래서 이제
+// "정말 방치됐는지"를 세션별 JSONL 파일의 마지막 수정 시각으로 직접 판단한다 — 최근에도
+// 계속 쓰이고 있었으면 그대로 두고(파이프라인이 재기동 후 같은 논리 id로 자연스럽게
+// 다시 이어 관찰), 한참 조용했던 것만 진짜 방치로 보고 끝낸다.
+const ABANDONED_SESSION_CUTOFF_MS = 5 * 60_000
+const staleSessions = db
+  .prepare(`SELECT id, project_path FROM sessions WHERE ended_at IS NULL`)
+  .all() as Array<{ id: string; project_path: string | null }>
+const endSessionAtBootStmt = db.prepare(`UPDATE sessions SET ended_at = @endedAt WHERE id = @id`)
+const bootTime = Date.now()
+let endedStaleCount = 0
+for (const session of staleSessions) {
+  // 재개된 세션의 id는 "원본rawId#새UUID" 형태다(resolveLogicalSessionId 참조) — 실제
+  // JSONL 파일명은 project_path 없이도, 항상 원본 rawId다.
+  const rawId = session.id.split('#')[0]
+  const filePath = session.project_path ? join(getClaudeProjectDir(session.project_path), `${rawId}.jsonl`) : null
+  let recentlyActive = false
+  if (filePath) {
+    try {
+      recentlyActive = bootTime - statSync(filePath).mtimeMs < ABANDONED_SESSION_CUTOFF_MS
+    } catch {
+      recentlyActive = false // 파일이 없으면(지워짐 등) 당연히 방치된 것
+    }
+  }
+  if (!recentlyActive) {
+    endSessionAtBootStmt.run({ id: session.id, endedAt: new Date(bootTime).toISOString() })
+    endedStaleCount++
+  }
+}
+if (endedStaleCount > 0) {
+  console.log(`[cleanup] 방치된 세션 ${endedStaleCount}건 종료 처리(최근 ${ABANDONED_SESSION_CUTOFF_MS / 60_000}분 안에 활동 없음)`)
+}
 
 // 에이전트 자신의 Edit/Write가 파일 감시(chokidar)에 먼저 잡혀 "수동 수정"으로 중복
 // 기록되던 레이스가 과거에 남긴 고아 이벤트 정리 — 지금은 파이프라인이 tool_use를 읽는
@@ -384,21 +418,38 @@ if (process.env.FACTCODING_AUTOSTART_PIPELINE === '1') {
   startMonitoring(selfProject.id)
 }
 
+// 세션 재개(resolveLogicalSessionId)로 "오늘은 여기까지" → "시작하기"를 거치면 같은
+// 물리 대화(같은 JSONL 파일)가 여러 논리 세션 id로 쪼개진다(rawId, rawId#uuid1,
+// rawId#uuid2, ...) — 활동 탭이 항상 "가장 최근 세션 하나"만 조회하다 보니, 재개할
+// 때마다 그 이전 프롬프트/스텝/구조도가 화면에서 통째로 사라지는 문제가 있었다(사용자가
+// 재현·보고함). 아래 "세션 스코프" 조회들은 정확히 그 세션 하나가 아니라, 같은 rawId를
+// 공유하는 "재개 사슬" 전체를 대상으로 삼는다 — 강의노트 합성(createSessionTraceLoader,
+// session-trace.ts)은 의도적으로 그대로 세션 하나만 본다(완료 시점마다 그 구간만
+// 요약해야 다음 재개 이후 내용으로 새 노트가 다시 생성되므로, 여기서 넓히면 안 됨).
+function sessionChainRoot(sessionId: string): string {
+  return sessionId.split('#')[0]
+}
+
 const getToolEventsBySession = db.prepare(`
   SELECT * FROM tool_events
-  WHERE session_id = @session_id
+  WHERE session_id = @root OR session_id LIKE @root || '#%'
   ORDER BY created_at ASC, rowid ASC
 `)
 
+// turn_index가 아니라 created_at으로 정렬한다 — turn_index는 논리 세션마다 0부터 다시
+// 세는 카운터라(pipeline/index.ts의 turnIndexBySession), 재개 사슬을 합치면 서로 다른
+// 세션의 같은 turn_index가 뒤섞여 정렬이 깨진다. created_at은 실제 발화 시각이라 사슬
+// 전체에서 항상 올바른 순서를 준다(화면 표시용 턴 번호는 TurnList.buildTurnList가
+// 이 순서 안에서의 위치로 다시 매긴다).
 const getPromptsBySession = db.prepare(`
   SELECT * FROM prompts
-  WHERE session_id = @session_id
-  ORDER BY turn_index ASC
+  WHERE session_id = @root OR session_id LIKE @root || '#%'
+  ORDER BY created_at ASC
 `)
 
 const getNotesBySessionStmt = db.prepare(`
   SELECT * FROM assistant_notes
-  WHERE session_id = @session_id
+  WHERE session_id = @root OR session_id LIKE @root || '#%'
   ORDER BY created_at ASC, rowid ASC
 `)
 
@@ -413,7 +464,8 @@ const getSessionEndedAtStmt = db.prepare(`SELECT ended_at FROM sessions WHERE id
 // db:getSteps의 "진행 중" 판정용 — Stop 훅으로 이미 완료 처리된 턴의 스텝은
 // 세션이 아직 안 끝났어도 진행 중으로 보지 않는다.
 const getCompletedPromptIdsStmt = db.prepare(`
-  SELECT id FROM prompts WHERE session_id = @session_id AND completed_at IS NOT NULL
+  SELECT id FROM prompts
+  WHERE (session_id = @root OR session_id LIKE @root || '#%') AND completed_at IS NOT NULL
 `)
 
 // 세션 재개(resume)로 발급된 논리 id들은 원본 세션의 started_at을 그대로 물려받아
@@ -438,7 +490,9 @@ const setSkillLevelStmt = db.prepare(`
 const getExplanationsBySession = db.prepare(`
   SELECT ae.* FROM ai_explanations ae
   JOIN prompts p ON p.id = ae.target_id
-  WHERE ae.target_type = 'prompt' AND p.session_id = @session_id AND ae.skill_level = @skill_level
+  WHERE ae.target_type = 'prompt'
+    AND (p.session_id = @root OR p.session_id LIKE @root || '#%')
+    AND ae.skill_level = @skill_level
 `)
 
 const getCodeUnitsStmt = db.prepare(`
@@ -475,7 +529,7 @@ const getOrphanVersions = db.prepare(`
   FROM code_unit_versions v
   JOIN code_units u ON u.id = v.unit_id
   JOIN tool_events te ON te.id = v.tool_event_id
-  WHERE v.prompt_id IS NULL AND te.session_id = @session_id
+  WHERE v.prompt_id IS NULL AND (te.session_id = @root OR te.session_id LIKE @root || '#%')
   ORDER BY v.created_at ASC
 `)
 
@@ -490,7 +544,7 @@ const getOrphanVersionExplanations = db.prepare(`
   JOIN code_unit_versions v ON v.id = ae.target_id
   JOIN tool_events te ON te.id = v.tool_event_id
   WHERE ae.target_type = 'code_unit_version' AND v.prompt_id IS NULL
-    AND te.session_id = @session_id AND ae.skill_level = @skill_level
+    AND (te.session_id = @root OR te.session_id LIKE @root || '#%') AND ae.skill_level = @skill_level
 `)
 
 // from/to unit id 둘 다 해시에 project_id가 포함돼 있어(unit-id.ts) 한쪽만 조인해도 충분하다.
@@ -633,11 +687,11 @@ function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('db:getToolEvents', (_event, sessionId: string): ToolEvent[] => {
-    return getToolEventsBySession.all({ session_id: sessionId }) as ToolEvent[]
+    return getToolEventsBySession.all({ root: sessionChainRoot(sessionId) }) as ToolEvent[]
   })
 
   ipcMain.handle('db:getPrompts', (_event, sessionId: string): Prompt[] => {
-    return getPromptsBySession.all({ session_id: sessionId }) as Prompt[]
+    return getPromptsBySession.all({ root: sessionChainRoot(sessionId) }) as Prompt[]
   })
 
   ipcMain.handle('db:getSkillLevel', (): SkillLevel => {
@@ -653,7 +707,7 @@ function registerIpcHandlers(): void {
     'db:getExplanations',
     (_event, sessionId: string, skillLevel: SkillLevel): AiExplanation[] => {
       return getExplanationsBySession.all({
-        session_id: sessionId,
+        root: sessionChainRoot(sessionId),
         skill_level: skillLevel
       }) as AiExplanation[]
     }
@@ -668,8 +722,9 @@ function registerIpcHandlers(): void {
     'db:getSteps',
     (_event, sessionId: string, skillLevel: SkillLevel): StepWithExplanation[] => {
       const session = getSessionEndedAtStmt.get({ id: sessionId }) as { ended_at: string | null } | undefined
-      const events = getToolEventsBySession.all({ session_id: sessionId }) as ToolEvent[]
-      const notes = getNotesBySessionStmt.all({ session_id: sessionId }) as AssistantNote[]
+      const root = sessionChainRoot(sessionId)
+      const events = getToolEventsBySession.all({ root }) as ToolEvent[]
+      const notes = getNotesBySessionStmt.all({ root }) as AssistantNote[]
       const steps = groupIntoSteps(notes, events)
       const explanationsByStepId = new Map(
         (getStepExplanationsStmt.all({ skill_level: skillLevel }) as AiExplanation[]).map((e) => [
@@ -683,7 +738,7 @@ function registerIpcHandlers(): void {
       // pending 도구/노트 활동까지 보는 공통 기준 — step-worker의 요약 대상 판정과 동일) —
       // 세션 종료만 기준으로 삼으면 에이전트가 일을 끝낸 뒤에도 계속 진행 중으로 보인다.
       const completedPromptIds = new Set(
-        (getCompletedPromptIdsStmt.all({ session_id: sessionId }) as { id: string }[]).map((r) => r.id)
+        (getCompletedPromptIdsStmt.all({ root }) as { id: string }[]).map((r) => r.id)
       )
       const lastStepInProgress =
         (session?.ended_at ?? null) === null &&
@@ -728,7 +783,7 @@ function registerIpcHandlers(): void {
       if (promptId) {
         return getVersionsByPrompt.all({ prompt_id: promptId }) as CodeUnitVersionWithUnit[]
       }
-      return getOrphanVersions.all({ session_id: sessionId }) as CodeUnitVersionWithUnit[]
+      return getOrphanVersions.all({ root: sessionChainRoot(sessionId) }) as CodeUnitVersionWithUnit[]
     }
   )
 
@@ -742,7 +797,7 @@ function registerIpcHandlers(): void {
         }) as AiExplanation[]
       }
       return getOrphanVersionExplanations.all({
-        session_id: sessionId,
+        root: sessionChainRoot(sessionId),
         skill_level: skillLevel
       }) as AiExplanation[]
     }
