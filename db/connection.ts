@@ -40,6 +40,7 @@ function applyMigrations(db: Database.Database): void {
   addColumnIfMissing(db, 'prompts', 'completed_at', 'DATETIME')
   addColumnIfMissing(db, 'prompts', 'pending_plan_source_text', 'TEXT')
   addColumnIfMissing(db, 'sessions', 'completed_at', 'DATETIME')
+  addColumnIfMissing(db, 'sessions', 'hooks_alive', 'INTEGER NOT NULL DEFAULT 0')
 }
 
 function addColumnIfMissing(db: Database.Database, table: string, column: string, type: string): void {

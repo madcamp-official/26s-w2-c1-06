@@ -29,10 +29,13 @@ const MANUAL_EDIT_DEDUP_WINDOW_MS = 2000;
 // STEP_IDLE_GAP_MS(90초, 강의노트용 스텝 묶기 기준)와는 목적이 달라 일부러 분리한다 —
 // 그쪽은 백그라운드 캡션 생성이라 늦어도 체감이 없지만, 이건 사용자가 보고 있는 로딩
 // 스피너라 90초는 너무 길다. repo.completeIdlePrompts의 pending tool_event 가드 덕분에
-// 오래 걸리는 도구 실행 중엔 절대 오판하지 않고, 설령 판단이 틀려도(에이전트가 실제로는
-// 계속 생각 중이었던 경우) 새 tool_use가 오는 순간 reopenPrompt로 즉시 되돌리므로 짧게
-// 잡아도 안전하다.
+// 오래 걸리는 도구 실행 중엔 오판하지 않지만, 도구 호출 없이 20초 넘게 이어지는
+// thinking 구간은 여전히 오판할 수 있다(reopenPrompt로 되돌리긴 하지만 그 사이 진행바가
+// 100%로 튀었다 되돌아오는 플리커가 사용자에게 그대로 보인다) — 그래서 이 짧은 컷오프는
+// 훅이 안 붙은 세션(Stop 훅이 영원히 안 오는 경우)에만 쓰고, 훅 마커를 관찰한 세션은
+// 아래 HOOKED_FALLBACK_IDLE_GAP_MS(Stop 마커 유실 대비 안전망)만 적용한다.
 const FALLBACK_IDLE_GAP_MS = 20_000;
+const HOOKED_FALLBACK_IDLE_GAP_MS = 90_000;
 // 위 유휴 임계값을 체감 지연 없이 잡아내기 위한 체크 주기.
 const IDLE_COMPLETION_CHECK_MS = 5_000;
 
@@ -474,7 +477,8 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
   function checkIdleCompletion() {
     try {
       const idleCutoff = new Date(Date.now() - FALLBACK_IDLE_GAP_MS).toISOString();
-      const changed = repo.completeIdlePrompts(idleCutoff);
+      const hookedIdleCutoff = new Date(Date.now() - HOOKED_FALLBACK_IDLE_GAP_MS).toISOString();
+      const changed = repo.completeIdlePrompts(idleCutoff, hookedIdleCutoff);
       if (changed > 0) emitter.emit('turn-completed');
     } catch (err) {
       emitter.emit('error', err);
@@ -491,6 +495,10 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
     config.projectPath,
     (marker) => {
       const sessionId = resolveLogicalSessionId(marker.sessionId, marker.ts);
+      // 어떤 종류든 훅 마커가 도착했다 = 이 세션엔 훅이 실제로 붙어 있다 — Stop 훅이
+      // 턴 완료를 즉시 찍어줄 것이므로 checkIdleCompletion의 "유휴 = 완료" 추측을
+      // 보수적으로(긴 컷오프) 전환한다.
+      repo.markSessionHooksAlive(sessionId);
       if (marker.type === 'start') {
         repo.setSessionStartedAt(sessionId, marker.ts);
         emitter.emit('session-updated');

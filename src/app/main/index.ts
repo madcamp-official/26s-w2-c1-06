@@ -23,7 +23,7 @@ import type {
   StepWithExplanation,
   ToolEvent
 } from '@shared/types'
-import { groupIntoSteps, STEP_IDLE_GAP_MS } from '@shared/steps'
+import { groupIntoSteps, isQuietSince, STEP_IDLE_GAP_MS } from '@shared/steps'
 import type { LiveStatus } from '@shared/stepProgress'
 import { startPipeline } from '@pipeline/index'
 import { startCaptionWorker } from './caption-worker'
@@ -625,20 +625,17 @@ function registerIpcHandlers(): void {
       )
       const lastStep = steps[steps.length - 1]
       // 마지막 스텝이라도 "진행 중"으로 보지 않는 경우: 그 스텝이 속한 턴이 Stop 훅으로
-      // 이미 완료됐거나(completed_at), 마지막 이벤트 후 스텝 유휴시간이 지났을 때 —
+      // 이미 완료됐거나(completed_at), 마지막 활동 후 스텝 유휴시간이 지났을 때(isQuietSince,
+      // pending 도구/노트 활동까지 보는 공통 기준 — step-worker의 요약 대상 판정과 동일) —
       // 세션 종료만 기준으로 삼으면 에이전트가 일을 끝낸 뒤에도 계속 진행 중으로 보인다.
       const completedPromptIds = new Set(
         (getCompletedPromptIdsStmt.all({ session_id: sessionId }) as { id: string }[]).map((r) => r.id)
       )
-      const lastEvent = lastStep?.events[lastStep.events.length - 1]
-      const lastEventStale = lastEvent?.created_at
-        ? Date.now() - Date.parse(lastEvent.created_at) > STEP_IDLE_GAP_MS
-        : false
       const lastStepInProgress =
         (session?.ended_at ?? null) === null &&
         lastStep !== undefined &&
         !(lastStep.promptId !== null && completedPromptIds.has(lastStep.promptId)) &&
-        !lastEventStale
+        !isQuietSince(lastStep, notes, STEP_IDLE_GAP_MS)
 
       return steps.map((step) => ({
         stepId: step.id,

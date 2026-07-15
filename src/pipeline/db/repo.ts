@@ -35,6 +35,14 @@ export class Repo {
     this.db.prepare(`UPDATE sessions SET ended_at = @endedAt WHERE id = @id`).run({ id, endedAt });
   }
 
+  // 훅 마커(SessionStart/Stop/SessionEnd)를 하나라도 관찰한 세션 표시 — 이 세션은 턴 완료가
+  // Stop 훅으로 즉시 오므로, completeIdlePrompts의 "유휴 = 완료" 추측을 보수적(긴 컷오프)으로만
+  // 적용한다. 호출 시점엔 행이 항상 존재한다 — 마커 처리도 resolveLogicalSessionId를 먼저
+  // 통과하는데 그 안의 ensureSession이 행을 만든다(pipeline/index.ts).
+  markSessionHooksAlive(id: string): void {
+    this.db.prepare(`UPDATE sessions SET hooks_alive = 1 WHERE id = @id AND hooks_alive = 0`).run({ id });
+  }
+
   // 세션 재개(resume) 감지용: 이 id로 이미 종료 처리된 세션 행이 있는지 확인한다
   // (index.ts의 resolveLogicalSessionId 참조 — 같은 JSONL 세션을 "완료" 후 다시
   // "시작하기"로 재개하면 새 논리 세션 id를 발급해야 강의노트 재생성이 걸린다).
@@ -102,34 +110,52 @@ export class Repo {
   // caption-worker.ts의 getNextCompletedTurn과 같은 "완료로 볼 조건"(다음 턴 시작/세션 종료/
   // 유휴시간 초과)이지만, 그쪽은 캡션 생성 후보 선정에만 쓰고 completed_at 자체는 안 건드려서
   // 이 문제를 못 풀었다 — 여기서는 실제로 컬럼을 채워 turn-completed 이벤트가 걸리게 한다.
-  // 유휴시간 조건에만(다음 턴 시작/세션 종료는 그 자체로 확실한 신호라 예외) pending
-  // tool_event가 없어야 한다는 조건을 추가로 건다 — tool_events.created_at은 도구를
-  // "호출한" 시각이라 tool_result 완료 시각을 반영하지 못하므로, 이 가드가 없으면 빌드/
-  // 테스트처럼 오래 걸리는 도구가 아직 실행 중인데도 유휴로 오판해 "완료"로 잘못 찍을 수 있다.
-  completeIdlePrompts(idleCutoffIso: string): number {
+  // 유휴시간 조건에만(다음 턴 시작/세션 종료는 그 자체로 확실한 신호라 예외) 오판 가드를 건다:
+  // - pending tool_event가 없어야 한다 — tool_events.created_at은 도구를 "호출한" 시각이라
+  //   tool_result 완료 시각을 반영하지 못하므로, 이 가드가 없으면 빌드/테스트처럼 오래 걸리는
+  //   도구가 아직 실행 중인데도 유휴로 오판해 "완료"로 잘못 찍을 수 있다.
+  // - "마지막 활동"에 assistant_notes도 포함한다 — 에이전트가 도구 없이 텍스트/서술만 이어가는
+  //   구간을 유휴로 오판하지 않도록.
+  // - 이 턴에서 관찰된 활동(tool_event 또는 note)이 하나라도 있어야 한다 — 턴 시작 직후 긴
+  //   thinking 구간(아무것도 아직 안 나옴)을 prompts.created_at + 유휴시간만으로 완료 처리하면
+  //   진행바가 시작하자마자 100%로 튀었다가 첫 tool_use의 reopenPrompt로 되돌아오는 플리커가
+  //   실제로 났다. 아무 활동도 없이 끝나는 턴은 다음 턴 시작/세션 종료 조건이 결국 닫아준다.
+  // - 훅 마커를 관찰한 세션(hooks_alive)은 Stop 훅이 완료를 즉시 찍어주므로, 추측 폴백은
+  //   훨씬 긴 컷오프(@hookedIdleCutoff, Stop 마커 유실 대비 안전망)로만 적용한다.
+  completeIdlePrompts(idleCutoffIso: string, hookedIdleCutoffIso: string): number {
     const result = this.db
       .prepare(
         `UPDATE prompts
-         SET completed_at = COALESCE(
-           (SELECT MAX(te.created_at) FROM tool_events te WHERE te.prompt_id = prompts.id),
-           prompts.created_at
+         SET completed_at = MAX(
+           prompts.created_at,
+           COALESCE((SELECT MAX(te.created_at) FROM tool_events te WHERE te.prompt_id = prompts.id), ''),
+           COALESCE((SELECT MAX(an.created_at) FROM assistant_notes an WHERE an.prompt_id = prompts.id), '')
          )
          WHERE completed_at IS NULL
            AND (
              EXISTS (SELECT 1 FROM prompts nxt WHERE nxt.session_id = prompts.session_id AND nxt.turn_index > prompts.turn_index)
              OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = prompts.session_id AND s.ended_at IS NOT NULL)
              OR (
-                  COALESCE(
-                    (SELECT MAX(te.created_at) FROM tool_events te WHERE te.prompt_id = prompts.id),
-                    prompts.created_at
-                  ) <= @idleCutoff
+                  (
+                    EXISTS (SELECT 1 FROM tool_events te WHERE te.prompt_id = prompts.id)
+                    OR EXISTS (SELECT 1 FROM assistant_notes an WHERE an.prompt_id = prompts.id)
+                  )
+                  AND MAX(
+                    prompts.created_at,
+                    COALESCE((SELECT MAX(te.created_at) FROM tool_events te WHERE te.prompt_id = prompts.id), ''),
+                    COALESCE((SELECT MAX(an.created_at) FROM assistant_notes an WHERE an.prompt_id = prompts.id), '')
+                  ) <= CASE
+                    WHEN EXISTS (SELECT 1 FROM sessions s WHERE s.id = prompts.session_id AND s.hooks_alive = 1)
+                    THEN @hookedIdleCutoff
+                    ELSE @idleCutoff
+                  END
                   AND NOT EXISTS (
                     SELECT 1 FROM tool_events te WHERE te.prompt_id = prompts.id AND te.status = 'pending'
                   )
                 )
            )`
       )
-      .run({ idleCutoff: idleCutoffIso });
+      .run({ idleCutoff: idleCutoffIso, hookedIdleCutoff: hookedIdleCutoffIso });
     return result.changes;
   }
 
