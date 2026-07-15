@@ -73,7 +73,12 @@ function broadcastDataChanged(kind: DataChangeKind): void {
 }
 
 const aiProvider = createAIProvider()
-const captionWorker = startCaptionWorker(db, aiProvider, () => broadcastDataChanged('explanation'))
+const captionWorker = startCaptionWorker(
+  db,
+  aiProvider,
+  () => broadcastDataChanged('explanation'),
+  () => broadcastDataChanged('trace')
+)
 const stopLectureNoteWorker = startLectureNoteWorker(db, aiProvider, () => broadcastDataChanged('lecture-note'))
 // 실시간 진행 로그(활동 탭 "바뀐 구조와 변경사항") — 턴 완료를 기다리는 caption-worker와
 // 달리 스텝(유휴시간/개수 단위) 하나가 끝날 때마다 즉시 요약한다. 스텝 요약도

@@ -107,9 +107,13 @@ function TimelineNode({
   onSelect: () => void
 }) {
   const isOrphan = item.turnId === ORPHAN_TURN_ID
-  // Stop 훅 신호(completedAt) 기준으로 진행 중 여부를 판단한다 — AI 캡션(explanation)은
-  // 완료 후 5초 폴링+API 호출을 거쳐 늦게 도착하므로, 그걸 기다리면 에이전트가 실제로
-  // 멈춘 뒤에도 한참 스피너가 계속 돈다.
+  // Stop 훅(턴 종료) 신호(completedAt) 기준으로 진행 중 여부를 판단한다. 한때 여기에
+  // liveStatus.idle(step-worker가 세션 전체에서 계산하는 전역 "지금 활동 없음" 신호)도
+  // 같이 썼는데, 이건 가장 최근 스텝 하나만 보고 판단해서 새 턴이 막 시작해 이 턴의
+  // 스텝이 아직 하나도 없는 순간엔 "직전 턴 마지막 스텝이 idle"이라는 이유로 이 새 턴을
+  // 잘못 "완료"로 표시했다(체크 아이콘이 시작하자마자 잠깐 떴다가 스피너로 바뀜). Stop
+  // 훅이 새 세션에서도 안정적으로 붙게 된 뒤로는(파이프라인 attachTo 수정 참고) 이 폴백이
+  // 굳이 없어도 completedAt이 충분히 빨리 채워진다.
   const inProgress = item.isLastTurn && !item.completedAt && !isOrphan
   const Icon = isOrphan ? FolderKanban : inProgress ? Loader2 : CheckCircle2
   const baseLabel = isOrphan

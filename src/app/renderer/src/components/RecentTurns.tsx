@@ -120,7 +120,9 @@ export function RecentTurns({
                       </h3>
                       <span className="shrink-0 text-[11px] text-muted-foreground">{time}</span>
                     </div>
-                    <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-muted-foreground">{desc}</p>
+                    <p className="mt-1 whitespace-pre-line text-[13.5px] leading-6 text-muted-foreground">
+                      {desc}
+                    </p>
                   </div>
                   <ChevronRight
                     size={16}

@@ -39,7 +39,8 @@ export interface CaptionWorkerHandle {
 export function startCaptionWorker(
   db: Database.Database,
   aiProvider: AIProvider,
-  onExplanationSaved?: () => void
+  onExplanationSaved?: () => void,
+  onTurnCompleted?: () => void
 ): CaptionWorkerHandle {
   const getSkillLevel = db.prepare(`
     SELECT value FROM user_settings WHERE key = 'skill_level'
@@ -84,6 +85,34 @@ export function startCaptionWorker(
 
   const getEventsForPrompt = db.prepare(`
     SELECT * FROM tool_events WHERE prompt_id = @prompt_id ORDER BY created_at ASC
+  `)
+
+  // prompts.completed_at은 원래 Stop 훅(매 턴 종료 신호) 하나로만 채워졌다 — 그런데
+  // Stop 훅은 관찰 대상 Claude Code 세션이 "관찰 시작"보다 먼저 열려 있었거나(훅은
+  // 세션 시작 시점에 한 번 로드되므로 나중에 .claude/settings.json에 추가해도 그
+  // 세션엔 반영이 안 됨) 훅 스크립트 실행이 어떤 이유로 실패하면 영원히 안 온다 —
+  // 그러면 실제로는 코딩이 끝나 캡션까지 다 생겼는데도(아래 idle 폴백 덕분) "현재
+  // 프롬프트" 카드/진행바/타임라인 스피너는 completed_at만 보고 판단해서 계속
+  // "실행 중"으로 멈춰 있었다. getNextCompletedTurn이 캡션 생성 여부를 판단할 때
+  // 이미 쓰는 것과 똑같은 idle 기준(마지막 활동 후 STEP_IDLE_GAP_MS 경과)을 여기서도
+  // 그대로 적용해 completed_at 자체를 채운다 — Stop 훅이 오면 그게 훨씬 더 빨리
+  // 반영되니 그대로 우선하고, 이건 훅이 못 왔을 때의 안전망이다.
+  const markIdleTurnsCompleted = db.prepare(`
+    UPDATE prompts
+    SET completed_at = @now
+    WHERE completed_at IS NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM prompts nxt WHERE nxt.session_id = prompts.session_id AND nxt.turn_index > prompts.turn_index
+        )
+        OR EXISTS (
+          SELECT 1 FROM sessions s WHERE s.id = prompts.session_id AND s.ended_at IS NOT NULL
+        )
+        OR COALESCE(
+             (SELECT MAX(te.created_at) FROM tool_events te WHERE te.prompt_id = prompts.id),
+             prompts.created_at
+           ) <= @idle_cutoff
+      )
   `)
 
   const getUncaptionedVersions = db.prepare(`
@@ -154,6 +183,10 @@ export function startCaptionWorker(
         'intermediate') as SkillLevel
 
       const idleCutoff = new Date(Date.now() - STEP_IDLE_GAP_MS).toISOString()
+
+      const idleCompletion = markIdleTurnsCompleted.run({ now: new Date().toISOString(), idle_cutoff: idleCutoff })
+      if (idleCompletion.changes > 0) onTurnCompleted?.()
+
       let completedTurn = getNextCompletedTurn.get({ skill_level: skillLevel, idle_cutoff: idleCutoff }) as
         | Prompt
         | undefined

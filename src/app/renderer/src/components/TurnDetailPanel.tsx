@@ -90,6 +90,14 @@ export function TurnDetailPanel({
   // 다른 프롬프트를 보다가 고른 선택이 남아있을 수 있어(선택 상태는 전역 공유), 이
   // 프롬프트의 구조도에 없는 유닛이면 굳이 안 맞는 타임라인을 보여주지 않는다.
   const selectedUnit = units.find((u) => u.id === selectedUnitId) ?? null
+  // 수동 수정 묶음(ORPHAN_TURN_ID)은 프롬프트로 "구현된" 게 아니라 개별 파일을 손으로
+  // 고친 것뿐이라 구조도(컴포넌트 관계도)를 보여줄 대상이 아니다 — 구조도는 실제
+  // 프롬프트 턴에서만 보여주고, 여기선 바뀐 파일 카드만 나열한다.
+  const isOrphan = turn.turnId === ORPHAN_TURN_ID
+  // Stop 훅이 completed_at을 찍은 턴(=이미 끝난 실행)은 실시간 진행 로그(스텝 단위 타임라인)를
+  // 그대로 반복할 이유가 없다 — 활동 탭에서 실행 중일 때 본 것과 똑같은 내용이 개요 탭에도
+  // 그대로 뜬다는 피드백을 받았다. 끝난 턴은 이미 나온 AI 요약과 코드 변경 카드만 정리해서 보여준다.
+  const completed = turn.completedAt != null
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card shadow-[0_3px_14px_rgba(42,46,38,.06)]">
@@ -106,7 +114,7 @@ export function TurnDetailPanel({
         </p>
       ) : (
         <>
-          {units.length > 0 && (
+          {units.length > 0 && !isOrphan && (
             <StructureOverview
               units={units}
               edges={edges}
@@ -126,12 +134,15 @@ export function TurnDetailPanel({
           {(turnSteps.length > 0 || unassignedVersions.length > 0) && (
             <div className="max-h-[640px] overflow-y-auto border-t border-border p-3.5">
               <p className="mb-2.5 text-[11px] font-semibold tracking-[0.04em] text-[#6d7069]">
-                실시간 진행 로그
+                {completed ? '정리된 변경사항' : '실시간 진행 로그'}
               </p>
               <ol className="space-y-2.5">
                 {turnSteps.map((step) => {
                   const nested = versionsByStepId.get(step.stepId) ?? []
-                  const isOpen = nestedOpen[step.stepId] ?? false
+                  // 완료된 턴은 스텝을 훑어보는 과정 자체가 중요하지 않으니, 어떤 코드가
+                  // 나왔는지 바로 보이도록 기본으로 펼쳐둔다(진행 중엔 스텝 목록이 계속
+                  // 늘어나므로 기본은 접어서 죽 훑어보는 용도를 유지).
+                  const isOpen = nestedOpen[step.stepId] ?? completed
                   return (
                     <li key={step.stepId}>
                       <StepCard step={step} />

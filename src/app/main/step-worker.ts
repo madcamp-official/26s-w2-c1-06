@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3'
 import type { AIProvider, StepInput } from '@ai/types'
 import { errorDetailOf, pickCodeCandidate, summarizeRawPayload } from '@ai/prompt-templates/stepCodeExtract'
 import type { AssistantNote, SkillLevel, ToolEvent } from '@shared/types'
-import { groupIntoSteps, type Step } from '@shared/steps'
+import { groupIntoSteps, STEP_IDLE_GAP_MS, type Step } from '@shared/steps'
 import type { LiveStatus } from '@shared/stepProgress'
 
 // 활동 탭 "바뀐 구조와 변경사항"에 실시간으로 쌓이는 진행 로그 — 턴이 끝나길 기다리는
@@ -16,6 +16,11 @@ const FAILURE_COOLDOWN_MS = 60_000
 // 기다리면 실시간감이 사라지므로, 훨씬 빠른 별도 주기로 로컬 규칙만 돌린다.
 const LIVE_STATUS_POLL_INTERVAL_MS = 1500
 const LIVE_STATUS_ARG_MAX_LENGTH = 50
+// "지금 활동 중인가"(liveStatus.idle) 판정 전용 유휴 임계값. 스텝 경계(STEP_IDLE_GAP_MS,
+// 90초)나 완료 처리(completed_at)와 달리 이건 순수 화면 표시용 신호라, Stop 훅이 못 와도
+// (이 환경에선 자주 그렇다) 90초를 기다리지 않고 훨씬 빨리 "손을 뗌"을 알아채게 짧게 잡는다.
+// 이 값을 줄여도 스텝을 나누는 기준(groupIntoSteps)이나 요약/완료 처리는 전혀 바뀌지 않는다.
+const LIVE_IDLE_GAP_MS = 45_000
 
 interface StepRow {
   id: string
@@ -60,6 +65,21 @@ function fallbackSummaryFromNote(noteText: string | null | undefined): string {
 
 function truncateForLiveStatus(text: string): string {
   return text.length > LIVE_STATUS_ARG_MAX_LENGTH ? text.slice(0, LIVE_STATUS_ARG_MAX_LENGTH) + '…' : text
+}
+
+// db:getSteps(main/index.ts)의 "진행 중" 판정은 completed_at/세션 종료 외에도 마지막
+// 이벤트 유휴시간(STEP_IDLE_GAP_MS)을 이미 폴백으로 본다 — 그런데 이 워커의 "요약
+// 대상에서 제외할 진행 중 스텝" 판정(tick의 inProgress)과 "지금 하는 중" 판정
+// (computeLiveStatus의 inProgress)은 이 폴백이 빠져 있었다. 그 결과 promptId가
+// null인 orphan 스텝(수동 수정)이나, Stop 훅/idle 완료 처리가 이 세션엔 아직 안
+// 온(세션이 계속 관찰 중이라 ended_at도 없는) 스텝은, 화면엔 이미 "진행 중" 표시가
+// 사라졌는데도(index.ts는 idle 폴백이 있어서) 워커는 계속 "아직 안 끝났다"고 보고
+// 영원히 요약을 안 만들어 "요약 생성 중…"이 안 풀리는 문제가 있었다. 두 판정 기준을
+// 동일하게 맞춘다.
+function isLastStepStale(step: Step | undefined, gapMs: number): boolean {
+  const lastEvent = step?.events[step.events.length - 1]
+  if (!lastEvent?.created_at) return false
+  return Date.now() - Date.parse(lastEvent.created_at) > gapMs
 }
 
 export interface StepWorkerOptions {
@@ -186,7 +206,12 @@ export function startStepWorker(
       const lastStep = steps[steps.length - 1]
       const lastStepTurnCompleted = lastStep?.promptId != null && completedPromptIds.has(lastStep.promptId)
       const inProgress =
-        session.ended_at != null || steps.length === 0 || lastStepTurnCompleted ? null : lastStep
+        session.ended_at != null ||
+        steps.length === 0 ||
+        lastStepTurnCompleted ||
+        isLastStepStale(lastStep, STEP_IDLE_GAP_MS)
+          ? null
+          : lastStep
 
       const summarized = new Set(
         (getSummarizedStepIds.all({ skill_level: skillLevel }) as { target_id: string }[]).map(
@@ -304,7 +329,12 @@ export function startStepWorker(
     )
     const lastStepTurnCompleted = lastStep?.promptId != null && completedPromptIds.has(lastStep.promptId)
     const inProgress =
-      session.ended_at != null || steps.length === 0 || lastStepTurnCompleted ? null : lastStep
+      session.ended_at != null ||
+      steps.length === 0 ||
+      lastStepTurnCompleted ||
+      isLastStepStale(lastStep, LIVE_IDLE_GAP_MS)
+        ? null
+        : lastStep
     if (!inProgress) return { text: '', idle: true }
 
     const lastEvent = inProgress.events[inProgress.events.length - 1]
