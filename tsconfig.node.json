@@ -1,0 +1,22 @@
+{
+  "extends": "@electron-toolkit/tsconfig/tsconfig.node.json",
+  "include": [
+    "electron.vite.config.ts",
+    "src/app/main/**/*",
+    "src/app/preload/**/*",
+    "src/shared/**/*",
+    "src/ai/**/*",
+    "src/pipeline/**/*.ts",
+    "db/**/*"
+  ],
+  "compilerOptions": {
+    "composite": true,
+    "types": ["node"],
+    "paths": {
+      "@shared/*": ["./src/shared/*"],
+      "@db/*": ["./db/*"],
+      "@ai/*": ["./src/ai/*"],
+      "@pipeline/*": ["./src/pipeline/*"]
+    }
+  }
+}

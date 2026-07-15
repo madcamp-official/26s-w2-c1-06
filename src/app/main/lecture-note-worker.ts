@@ -1,0 +1,115 @@
+import { randomUUID } from 'node:crypto'
+import type Database from 'better-sqlite3'
+import type { AIProvider } from '@ai/types'
+import type { Session, SkillLevel } from '@shared/types'
+import { createSessionTraceLoader } from './session-trace'
+
+const POLL_INTERVAL_MS = 3000
+// 같은 세션 합성이 계속 실패하면(429 쿼터 소진 등) 3초마다 무한 재시도하며 API를
+// 계속 두드린다 — 실패한 세션은 이 시간 동안 건너뛰고 다른 세션을 먼저 처리한다.
+const FAILURE_COOLDOWN_MS = 60_000
+
+// 프롬프트나 tool_event가 거의 없는 세션(예: "시작하기"를 누르자마자 바로 "완료"를
+// 누른 경우, 재개 직후 새 프롬프트 없이 다시 종료된 경우)은 AI에 넘길 실제 내용이
+// 없어서 "제공해주신 정보가 비어 있어 템플릿 형태로 작성합니다" 같은 의미 없는
+// 필러 노트만 나온다 — 최소한의 활동이 쌓인 세션만 강의노트를 합성한다.
+const MIN_PROMPTS_FOR_NOTE = 1
+const MIN_TOOL_EVENTS_FOR_NOTE = 1
+
+// SPEC 4.3.2 (완료 버튼 게이트로 개편): UI의 "완료" 버튼 클릭 → main이
+// sessions.completed_at 기록 → 여기서 그 전이를 감지해 강의노트를 합성한다.
+// SessionEnd 훅/앱 종료로만 끝난 세션(ended_at만 채워짐)은 사용자가 아직 그
+// 세션을 "완료"로 표시하지 않은 것일 수 있어(다른 프로젝트로 잠깐 전환 등)
+// 자동 합성 대상에서 제외한다. "아직 노트가 없는, 이미 완료 처리된 세션"을
+// 찾는 방식으로 구현해 NULL→NOT NULL 전이를 직접 추적할 필요가 없다
+// (lecture_notes 존재 여부 자체가 "이미 처리했다"는 표식). 세션당 최초 1회만
+// 자동 생성되고, 다른 난이도로 다시 보고 싶을 때의 온디맨드 재생성은 index.ts의
+// db:regenerateLectureNote IPC로 처리한다 (동일한 세션 트레이스 로더 재사용).
+// onNoteSaved: 강의노트를 저장할 때마다 호출된다 — Electron main이 이 콜백에서
+// 렌더러로 'data-changed'(kind: 'lecture-note')를 push해 다음 3초 폴링을 기다리지
+// 않고 즉시 반영되게 한다(SPEC 4.6).
+export function startLectureNoteWorker(
+  db: Database.Database,
+  aiProvider: AIProvider,
+  onNoteSaved?: () => void
+): () => void {
+  // completed_at은 사용자가 UI의 "완료" 버튼을 명시적으로 눌렀을 때만 기록된다
+  // (main/index.ts의 completeMonitoring) — 창을 그냥 닫거나 SessionEnd 훅만 발생한
+  // 세션은 ended_at만 채워지고 completed_at은 비어 강의노트가 자동 생성되지 않는다.
+  const getCompletedSessionsWithoutNotes = db.prepare(`
+    SELECT s.* FROM sessions s
+    WHERE s.completed_at IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM lecture_notes ln WHERE ln.session_id = s.id)
+  `)
+
+  const getSkillLevel = db.prepare(`
+    SELECT value FROM user_settings WHERE key = 'skill_level'
+  `)
+
+  const loadSessionTrace = createSessionTraceLoader(db)
+
+  const insertLectureNote = db.prepare(`
+    INSERT INTO lecture_notes (id, session_id, markdown, skill_level, created_at)
+    VALUES (@id, @session_id, @markdown, @skill_level, @created_at)
+  `)
+
+  let running = false
+  const retryAfterBySession = new Map<string, number>()
+  // 활동이 부족해 노트를 만들지 않기로 확정한 세션 — 종료된 세션은 이후로도 내용이
+  // 더 쌓이지 않으므로, 한 번 판단하면 매 틱마다 다시 로드해 재판단할 필요가 없다.
+  const insufficientSessionIds = new Set<string>()
+
+  const tick = async (): Promise<void> => {
+    if (running) return
+    running = true
+    try {
+      const completedSessions = (getCompletedSessionsWithoutNotes.all() as Session[]).filter(
+        (s) => !insufficientSessionIds.has(s.id)
+      )
+
+      const skillLevel = ((getSkillLevel.get() as { value: string } | undefined)?.value ??
+        'intermediate') as SkillLevel
+
+      // 세션당 큰 컨텍스트 하나를 통째로 던지는 무거운 호출이므로, 틱당 1개만 처리.
+      // 직전에 실패한 세션(쿨다운 중)은 건너뛰어 다른 세션까지 막히지 않게 한다.
+      const session = completedSessions.find((s) => (retryAfterBySession.get(s.id) ?? 0) <= Date.now())
+      if (!session) return
+
+      try {
+        const trace = loadSessionTrace(session.id)
+        if (!trace) return
+
+        if (
+          trace.prompts.length < MIN_PROMPTS_FOR_NOTE ||
+          trace.toolEvents.length < MIN_TOOL_EVENTS_FOR_NOTE
+        ) {
+          insufficientSessionIds.add(session.id)
+          return
+        }
+
+        const markdown = await aiProvider.synthesizeLectureNote(trace, skillLevel)
+
+        insertLectureNote.run({
+          id: randomUUID(),
+          session_id: session.id,
+          markdown,
+          skill_level: skillLevel,
+          created_at: new Date().toISOString()
+        })
+        onNoteSaved?.()
+      } catch (error) {
+        retryAfterBySession.set(session.id, Date.now() + FAILURE_COOLDOWN_MS)
+        throw error
+      }
+    } catch (error) {
+      console.error('[lecture-note-worker] failed to synthesize lecture note:', error)
+    } finally {
+      running = false
+    }
+  }
+
+  const timer = setInterval(tick, POLL_INTERVAL_MS)
+  tick()
+
+  return () => clearInterval(timer)
+}

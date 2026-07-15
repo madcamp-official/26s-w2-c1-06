@@ -1,0 +1,38 @@
+appId: com.factcoding.app
+productName: Factcoding
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**/*
+  - db/schema.sql
+  - '!node_modules/**/*.map'
+asarUnpack:
+  - '**/*.node'
+# 파이프라인 런타임 자산 — main 번들 밖에서 파일로 직접 읽어야 하는 것들
+# (src/app/main/index.ts의 packaged 분기 pipelineAssets 경로와 짝을 이룸)
+extraResources:
+  # 배포된 앱이 OpenAI를 호출할 때 쓰는 프록시 토큰/URL(진짜 OpenAI 키 아님, src/ai/
+  # createAIProvider.ts 참조) — 리포에는 안 올라가는 로컬 파일(.gitignore 대상)이라
+  # 빌드하는 사람의 머신에 이 파일이 있어야 AI 기능이 동작한다(없으면 MockAIProvider로
+  # 자동 폴백, 빌드 자체는 실패하지 않음). 값은 .env.production.example 참조.
+  - from: .env.production
+    to: .env.production
+  - from: src/pipeline/ast-diff/grammars
+    to: pipeline/grammars
+  - from: src/pipeline/hooks/session-event-hook.mjs
+    to: pipeline/hooks/session-event-hook.mjs
+  - from: node_modules/web-tree-sitter/tree-sitter.wasm
+    to: pipeline/tree-sitter.wasm
+  # TODO(ctags 패키징 미완료): dev 모드는 시스템에 설치된 Universal Ctags를 경로로 찾아 쓰지만
+  # (app/main/index.ts의 resolveDevCtagsBinary), 여기 번들할 pipeline/ctags/ctags는 아직 없다.
+  # Homebrew binary는 jansson/libyaml에 동적 링크돼 있어 그대로 복사하면 다른 기기에서 실행이
+  # 안 된다 — 정적 링크로 다시 빌드한 바이너리(플랫폼별)를 준비해 아래 주석을 풀 것.
+  # - from: resources/ctags-mac/ctags
+  #   to: pipeline/ctags/ctags
+win:
+  target: nsis
+mac:
+  target: dmg
+  category: public.app-category.education
+npmRebuild: true

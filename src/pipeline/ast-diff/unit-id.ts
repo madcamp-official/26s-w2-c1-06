@@ -1,0 +1,8 @@
+import { createHash } from 'node:crypto';
+
+/** code_units.id = hash(project_id + file_path + unit_name) (schema.sql 주석 기준).
+ * projectId를 해시에 포함해야 서로 다른 프로젝트에 같은 상대경로+유닛명이 있어도
+ * id가 충돌해 버전/엣지가 프로젝트 경계를 넘어 섞이지 않는다. */
+export function computeUnitId(projectId: string, filePath: string, unitName: string): string {
+  return createHash('sha1').update(projectId + ' ' + filePath + ' ' + unitName).digest('hex');
+}

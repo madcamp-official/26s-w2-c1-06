@@ -1,0 +1,95 @@
+export function formatDuration(ms: number | null): string {
+  if (ms == null) return '—'
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+export function formatTime(iso: string | null): string {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleTimeString('ko-KR', { hour12: false })
+}
+
+// "직전 실행의 과정" 등 데모 톤의 타임라인 리스트용 — 초 단위 정밀도 대신
+// "방금 전"/"n분 전" 식의 상대 시각으로 보여준다. formatTime은 절대 시각이
+// 필요한 곳(활동 탭 상세 등)에서 그대로 계속 쓴다.
+export function formatRelativeTime(iso: string | null): string {
+  if (!iso) return '—'
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return '—'
+  const diffMs = Date.now() - then
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return '방금 전'
+  if (diffMin < 60) return `${diffMin}분 전`
+  const diffHour = Math.floor(diffMin / 60)
+  if (diffHour < 24) return `${diffHour}시간 전`
+  const diffDay = Math.floor(diffHour / 24)
+  if (diffDay < 7) return `${diffDay}일 전`
+  return new Date(iso).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })
+}
+
+// Claude Code가 사용자 메시지 앞뒤에 자동으로 끼워 넣는 컨텍스트 태그들(지금 연
+// IDE 파일, 선택 영역, 시스템 리마인더 등) — user_text에 그대로 저장되므로, 프롬프트
+// 제목/카드로 보여줄 땐 사람이 실제로 타이핑한 부분만 남기고 걷어낸다. AI 캡션 생성
+// (caption-worker)엔 원본 그대로 넘어가야 하므로 여기서 걷어내는 건 화면 표시용일 뿐,
+// DB에 저장된 원본 텍스트 자체는 건드리지 않는다.
+const SYSTEM_CONTEXT_TAG_NAMES = [
+  'ide_opened_file',
+  'ide_selection',
+  'ide_diagnostics',
+  'system-reminder',
+  // 백그라운드로 돌린 Bash 작업이 끝나면 Claude Code가 다음 사용자 메시지 자리에
+  // 자동으로 끼워 넣는 알림(실제로 걸러지지 않고 그대로 노출되는 버그가 있었음) —
+  // 사람이 타이핑한 게 아니므로 다른 시스템 태그와 동일하게 취급한다.
+  'task-notification',
+  'local-command-caveat',
+  'local-command-stdout',
+  'command-name',
+  'command-message',
+  'command-args'
+]
+const SYSTEM_CONTEXT_TAG_PATTERN = new RegExp(
+  `<(${SYSTEM_CONTEXT_TAG_NAMES.join('|')})>[\\s\\S]*?<\\/\\1>`,
+  'g'
+)
+
+export function stripSystemContextTags(text: string | null): string {
+  if (!text) return ''
+  return text.replace(SYSTEM_CONTEXT_TAG_PATTERN, '').trim()
+}
+
+// LLM이 "Markdown 문서를 작성해줘" 요청에 응답하면서, 답이 이미 Markdown인데도
+// 습관적으로 ```markdown ... ``` 코드 펜스로 한 번 더 감싸는 경우가 있다(강의노트
+// 생성 프롬프트에서 실제로 재현됨) — 그러면 react-markdown이 전체를 하나의 코드
+// 블록으로 보고 렌더링해서 #/##/**가 전부 그대로 텍스트로 보이고, 첫 줄을 제목으로
+// 쓰는 곳(noteTitle)도 펜스 표시줄(```markdown)을 제목으로 잘못 뽑는다.
+// 전체를 한 번에 매칭하는 정규식 대신 첫 줄/마지막 줄만 검사한다 — 본문 중간에
+// 정상적인 코드 예제(```python ... ``` 등)가 껴 있어도 안전하고(중첩된 펜스와
+// 헷갈리지 않음), OpenAI 응답의 CRLF 줄바꿈에도 흔들리지 않는다.
+const FENCE_OPEN_PATTERN = /^```(?:markdown|md)?$/
+const FENCE_CLOSE_PATTERN = /^```$/
+
+export function stripMarkdownFence(markdown: string): string {
+  const lines = markdown.trim().split('\n')
+  if (lines.length < 2) return markdown.trim()
+
+  const firstLine = lines[0].trim()
+  const lastLine = lines[lines.length - 1].trim()
+  if (!FENCE_OPEN_PATTERN.test(firstLine) || !FENCE_CLOSE_PATTERN.test(lastLine)) {
+    return markdown.trim()
+  }
+
+  return lines
+    .slice(1, -1)
+    .join('\n')
+    .trim()
+}
+
+export function parseConceptTags(json: string | null): string[] {
+  if (!json) return []
+  try {
+    const parsed = JSON.parse(json)
+    return Array.isArray(parsed) ? parsed.filter((tag): tag is string => typeof tag === 'string') : []
+  } catch {
+    return []
+  }
+}

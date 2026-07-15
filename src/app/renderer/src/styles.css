@@ -1,0 +1,198 @@
+/* Factcoding Frontend Demo(라이트 크림 톤)에 맞춘 Tailwind v4 설정.
+   토큰 값은 Factcoding Frontend Demo/src/styles/theme.css 기준. */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@import 'tailwindcss' source(none);
+@source './';
+
+:root {
+  --background: #fbfaf7;
+  --foreground: #21221f;
+  --card: #ffffff;
+  --card-foreground: #21221f;
+  --popover: #ffffff;
+  --popover-foreground: #21221f;
+  --primary: #285c52;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f0eb;
+  --secondary-foreground: #373832;
+  --muted: #f6f5f1;
+  --muted-foreground: #6d7069;
+  --accent: #e4f0eb;
+  --accent-foreground: #245248;
+  --destructive: #c65c52;
+  --destructive-foreground: #ffffff;
+  --border: #e6e4dd;
+  --input-background: #f6f5f1;
+  --ring: #76aa9d;
+  --radius: 0.875rem;
+}
+
+@theme inline {
+  --font-sans: 'DM Sans', 'Noto Sans KR', 'Pretendard', 'Apple SD Gothic Neo', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input-background: var(--input-background);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+    font-size: 14px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #d7d5cb;
+    border-radius: 5px;
+    border: 2px solid var(--background);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* React Flow는 다크 테마 기본값이 아니라 라이트 배경 그대로 잘 어울리지만,
+   전체 배경만 투명하게 맞춰 카드 배경과 겹치지 않게 한다 */
+.structure-overview .react-flow {
+  background: transparent;
+}
+
+/* 난이도 조절 슬라이더 — 기본 range 인풋 스타일은 브라우저마다 달라 트랙/썸을 직접 그린다 */
+.difficulty-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #b8d9ce, #285c52);
+  outline: none;
+  cursor: pointer;
+}
+.difficulty-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #285c52;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1px #285c52;
+  cursor: pointer;
+}
+.difficulty-slider::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #285c52;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1px #285c52;
+  cursor: pointer;
+}
+
+/* react-markdown이 렌더하는 강의노트 본문 타이포그래피 */
+.markdown-body {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #3f514c;
+}
+.markdown-body :first-child {
+  margin-top: 0;
+}
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  margin: 1.2em 0 0.5em;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #1a3d35;
+}
+.markdown-body h1 {
+  font-size: 19px;
+}
+.markdown-body h2 {
+  font-size: 16px;
+}
+.markdown-body h3 {
+  font-size: 14px;
+}
+.markdown-body p {
+  margin: 0.6em 0;
+}
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.6em 0;
+  padding-left: 1.4em;
+}
+.markdown-body ul {
+  list-style: disc;
+}
+.markdown-body ol {
+  list-style: decimal;
+}
+.markdown-body li {
+  margin: 0.4em 0;
+  padding-left: 0.2em;
+}
+.markdown-body li::marker {
+  color: #4f9c84;
+}
+.markdown-body code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: #eef6f1;
+  color: #1f4a41;
+  border-radius: 4px;
+  padding: 0.1em 0.4em;
+}
+.markdown-body pre {
+  overflow-x: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #e6e4dd;
+  background: #f6f5f1;
+}
+.markdown-body pre code {
+  background: transparent;
+  padding: 0;
+}
+.markdown-body blockquote {
+  margin: 0.8em 0;
+  padding-left: 12px;
+  border-left: 3px solid #b8d9ce;
+  color: #5c7a6d;
+}

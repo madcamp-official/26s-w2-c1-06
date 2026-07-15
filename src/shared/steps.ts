@@ -1,0 +1,150 @@
+import type { AssistantNote, ToolEvent } from './types'
+
+// 실시간 진행 로그(step-worker.ts)의 기본 단위: tool_events를 "스텝" 단위로 묶는다.
+// assistant_note(에이전트 서사 텍스트) 하나를 스텝 경계로 쓰면 모델이 텍스트를 언제
+// 쓰는지에 좌우돼 결정론적이지 않다(같은 작업도 실행마다 다르게 잘림) — 그래서 이벤트
+// 스트림 자체의 유휴시간/개수만으로 정해지는 경계를 쓴다. note는 스텝 안에 우연히
+// 들어온 참고 텍스트일 뿐, 경계가 아니다.
+
+export const STEP_IDLE_GAP_MS = 90_000
+// "이 턴/스텝이 끝났다"고 화면에 빠르게 반영하기 위한 유휴 임계값 — Stop 훅이 못
+// 왔을 때(흔하다: 관찰 시작 전에 이미 열려 있던 Claude Code 세션은 훅이 아예 안 붙는다)
+// STEP_IDLE_GAP_MS(90초)까지 기다리면 에이전트가 실제로 멈춘 뒤에도 한참 "실행
+// 중"/"요약 생성 중…"으로 보인다. STEP_IDLE_GAP_MS 자체(스텝을 나누는 경계, 90초)는
+// 그대로 두고, "완료로 간주해도 되는가"를 판단하는 곳들(step-worker의 라이브 상태,
+// caption-worker의 턴 완료 처리/캡션 대상 판정)만 이 더 짧은 값을 쓴다.
+export const TURN_IDLE_GAP_MS = 45_000
+export const MAX_EVENTS_PER_STEP = 6
+// 유휴시간(90초)이나 개수(6개) cap에 걸리기 전이라도, 에이전트가 쉬지 않고 계속
+// 이것저것 빠르게 처리하면 스텝 하나가 너무 오래(몇 분씩) 안 닫혀서 실시간 진행
+// 로그 카드가 뜨문뜨문 뜨는 것처럼 느껴졌다 — 스텝 시작 후 이 시간이 지나면(그리고
+// 새 이벤트가 하나라도 더 들어오면) 무조건 닫고 새 스텝을 연다. 대략 30초에 카드
+// 하나 정도의 체감 주기를 노린 값.
+export const STEP_MAX_DURATION_MS = 30_000
+
+// isQuietSince의 pending 가드 상한 — tool_use만 관찰되고 tool_result 라인을 영영 못 본
+// 고아 pending 행(세션 파일 중간부터 tail한 경우 등)이 "아직 실행 중"으로 무한히
+// 남아 quiet 판정을 영원히 막지 않도록, 이 시간을 넘긴 pending은 무시한다.
+// Bash 타임아웃 상한(10분)보다 넉넉하게 잡은 값.
+const PENDING_EVENT_MAX_AGE_MS = 15 * 60_000
+
+// "마지막 활동 이후 gapMs가 지났다(= 이제 조용하다, 끝났을 수 있다)" 공통 판정 —
+// step-worker의 요약 대상/라이브 상태, main의 db:getSteps 진행 중 표시가 같은 기준을
+// 쓴다. 마지막 tool_event 시각만 보면 두 가지를 오판한다:
+// - tool_events.created_at은 도구를 "호출한" 시각이라, 마지막 이벤트가 아직
+//   pending(빌드/테스트처럼 오래 걸리는 도구가 실행 중)이면 시간이 지나도 조용한 게 아니다.
+// - 에이전트가 도구 없이 텍스트/서술만 이어가는 구간도 활동이다 — assistant_notes
+//   타임스탬프를 함께 본다.
+export function isQuietSince(
+  lastStep: Pick<Step, 'events'> | undefined,
+  notes: Pick<AssistantNote, 'created_at'>[],
+  gapMs: number
+): boolean {
+  const lastEvent = lastStep?.events[lastStep.events.length - 1]
+  const lastEventAt = lastEvent?.created_at ? Date.parse(lastEvent.created_at) : 0
+  if (
+    lastEvent?.status === 'pending' &&
+    lastEventAt > 0 &&
+    Date.now() - lastEventAt < PENDING_EVENT_MAX_AGE_MS
+  ) {
+    return false
+  }
+  const lastNote = notes[notes.length - 1]
+  const lastNoteAt = lastNote?.created_at ? Date.parse(lastNote.created_at) : 0
+  const lastActivityAt = Math.max(lastEventAt, lastNoteAt)
+  if (lastActivityAt === 0) return false
+  return Date.now() - lastActivityAt > gapMs
+}
+
+export interface Step {
+  id: string // 그 스텝의 첫 이벤트 id. 결정론적이고 재조회해도 항상 동일.
+  promptId: string | null
+  note: AssistantNote | null // 스텝의 시간 범위 안에 있던 note(가장 마지막 것). 없을 수 있음.
+  events: ToolEvent[]
+  startedAt: number // 정렬용 ms 타임스탬프
+}
+
+function timeMs(iso: string | null): number {
+  return iso ? Date.parse(iso) : 0
+}
+
+// prompt_id(턴)로 먼저 버킷팅해 스텝이 턴 경계를 넘지 않게 한 뒤, 각 턴 안에서
+// 이벤트를 시간순으로 훑으며 유휴시간(gap)/개수 cap을 넘을 때만 새 스텝을 연다.
+// 결과는 스텝 시작 시각 오름차순.
+export function groupIntoSteps(
+  notes: AssistantNote[],
+  events: ToolEvent[],
+  opts: { idleGapMs?: number; maxEvents?: number; maxDurationMs?: number } = {}
+): Step[] {
+  const idleGapMs = opts.idleGapMs ?? STEP_IDLE_GAP_MS
+  const maxEvents = opts.maxEvents ?? MAX_EVENTS_PER_STEP
+  const maxDurationMs = opts.maxDurationMs ?? STEP_MAX_DURATION_MS
+  const bucketKey = (promptId: string | null): string => promptId ?? '__orphan__'
+
+  const eventsByBucket = new Map<string, ToolEvent[]>()
+  for (const event of events) {
+    const key = bucketKey(event.prompt_id)
+    const bucket = eventsByBucket.get(key) ?? []
+    bucket.push(event)
+    eventsByBucket.set(key, bucket)
+  }
+
+  const notesByBucket = new Map<string, AssistantNote[]>()
+  for (const note of notes) {
+    const key = bucketKey(note.prompt_id)
+    const bucket = notesByBucket.get(key) ?? []
+    bucket.push(note)
+    notesByBucket.set(key, bucket)
+  }
+
+  const steps: Step[] = []
+
+  for (const [key, bucket] of eventsByBucket) {
+    const sorted = [...bucket].sort((a, b) => timeMs(a.created_at) - timeMs(b.created_at))
+    const bucketNotes = notesByBucket.get(key) ?? []
+
+    let current: ToolEvent[] = []
+    let lastEventTime = -Infinity
+    const promptId = sorted[0]?.prompt_id ?? null
+
+    const flush = (): void => {
+      if (current.length === 0) return
+      const startedAt = timeMs(current[0].created_at)
+      const endedAt = timeMs(current[current.length - 1].created_at)
+      // 스텝 시간 범위 안에 들어온 note 중 가장 마지막 것을 참고 텍스트로 붙인다.
+      const noteInRange = bucketNotes
+        .filter((n) => {
+          const t = timeMs(n.created_at)
+          return t >= startedAt && t <= endedAt
+        })
+        .sort((a, b) => timeMs(a.created_at) - timeMs(b.created_at))
+        .at(-1)
+
+      steps.push({
+        id: current[0].id,
+        promptId,
+        note: noteInRange ?? null,
+        events: current,
+        startedAt
+      })
+      current = []
+    }
+
+    for (const event of sorted) {
+      const t = timeMs(event.created_at)
+      const durationSoFar = current.length > 0 ? t - timeMs(current[0].created_at) : 0
+      if (
+        current.length > 0 &&
+        (t - lastEventTime > idleGapMs || current.length >= maxEvents || durationSoFar > maxDurationMs)
+      ) {
+        flush()
+      }
+      current.push(event)
+      lastEventTime = t
+    }
+    flush()
+  }
+
+  steps.sort((a, b) => a.startedAt - b.startedAt)
+  return steps
+}
