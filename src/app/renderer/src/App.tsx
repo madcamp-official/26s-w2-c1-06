@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen,
   Clock3,
@@ -257,6 +257,8 @@ function App() {
   }
 
   const currentTurn = prompts.length > 0 ? prompts[prompts.length - 1] : null
+  // 진행률 클램프용 — 같은 턴 안에서 지금까지 보여준 최고 진행률(아래 currentTurnProgressPercent 참조).
+  const progressFloorRef = useRef<{ turnId: string; percent: number } | null>(null)
   // Stop 훅(파이프라인)이 찍는 prompts.completed_at을 완료 판정의 근거로 쓴다 — 예전엔
   // AI 캡션(explanations)이 생겨야만 "완료"로 봤는데, 캡션은 5초 폴링+API 호출을 거쳐
   // 늦게 도착해서 에이전트가 실제로 멈춘 뒤에도 한참 "실행 중"으로 보이는 문제가 있었다.
@@ -272,25 +274,39 @@ function App() {
     : []
   const currentTurnStepCount = currentTurnSteps.filter((s) => !s.inProgress).length
   const currentTurnHasActiveStep = currentTurnSteps.some((s) => s.inProgress)
-  // "이 턴은 끝났다"는 completed_at(Stop 훅/90초 idle 폴백)을 우선 근거로 삼되, Stop 훅이
+  // "이 턴은 끝났다"는 completed_at(Stop 훅/idle 폴백)을 우선 근거로 삼되, Stop 훅이
   // 안 온 세션(흔하다 — 관찰 시작 전에 이미 열려 있던 Claude Code 세션은 훅이 하나도 안
-  // 붙는다)에서도 90초씩 기다리지 않도록 liveStatus.idle(step-worker가 1.5초 주기로
+  // 붙는다)에서도 하염없이 기다리지 않도록 liveStatus.idle(step-worker가 1.5초 주기로
   // 갱신하는 "지금 아무 도구도 안 쓰고 있다" 신호, idle 판정까지 45초)을 보조로 쓴다.
-  // liveStatus는 세션 전체에서 가장 최근 스텝 하나만 보고 계산되는 전역 신호라 그대로
-  // 쓰면 안 된다 — 새 턴이 막 시작해 이 턴의 스텝이 아직 하나도 없는 순간엔 "직전 턴의
-  // 마지막 스텝이 idle"이라는 이유만으로 새 턴을 완료로 잘못 판정해, 시작하자마자 100%로
-  // 찍혔다가 첫 스텝이 잡히면 낮은 값으로 리셋되는 버그가 있었다. 그래서 이 턴 자신의
-  // 스텝이 실제로 하나라도 생긴 뒤에만(currentTurnSteps.length > 0) liveStatus.idle을
-  // 신뢰한다 — 그 시점부턴 세션의 "가장 최근 스텝"이 곧 이 턴의 스텝이므로(다음 턴은
-  // 아직 없음) 안전하다. 캡션("직전 실행 과정") 생성은 completed_at 하나만 보고 뒤늦게
-  // 따라오므로, 이 빠른 신호로 100%를 채워도 캡션 타이밍과는 무관하게 동작한다.
-  const currentTurnLiveIdle = currentTurnSteps.length > 0 && liveStatus.idle
+  // 단, 두 가지 오판 가드가 필요하다:
+  // - 훅 마커가 관찰된 세션(liveStatus.hooksAlive)에선 idle 추측을 아예 쓰지 않는다 —
+  //   완료는 Stop 훅이 즉시 찍어주므로 추측이 필요 없고, 도구 호출 없이 45초 넘게
+  //   이어지는 thinking 구간을 완료로 오판해 진행바가 100%로 튀었다가 다음 tool_use에서
+  //   되돌아오는 플리커(실제로 재현된 버그)의 원인만 된다.
+  // - liveStatus는 세션 전체에서 가장 최근 스텝 하나만 보는 전역 신호라, 새 턴이 막
+  //   시작해 이 턴의 스텝이 아직 하나도 없는 순간엔 "직전 턴의 마지막 스텝이 idle"이라는
+  //   이유만으로 새 턴을 완료로 잘못 판정한다 — 이 턴 자신의 스텝이 하나라도 생긴
+  //   뒤에만(currentTurnSteps.length > 0) 신뢰한다.
+  // 캡션("직전 실행 과정") 생성은 completed_at 하나만 보고 뒤늦게 따라오므로, 이 빠른
+  // 신호로 100%를 채워도 캡션 타이밍과는 무관하게 동작한다.
+  const currentTurnLiveIdle =
+    !liveStatus.hooksAlive && currentTurnSteps.length > 0 && liveStatus.idle
   const currentTurnDone = currentTurn != null && (currentTurnCompleted || currentTurnLiveIdle)
+  // 완료 전 진행률은 같은 턴 안에서 절대 뒤로 가지 않게 클램프한다 — 스텝 경계는 새
+  // 이벤트가 붙으면 재계산되는 파생값이라, 닫힌 줄 알았던 마지막 스텝이 다시 진행 중으로
+  // 붙는 순간 effectiveSteps가 반 칸(0.5)씩 줄어 바가 미세하게 후퇴할 수 있다. 완료
+  // 오판이 되돌려지는 경우(reopenPrompt)에도 100%에서 곧장 이전 최고치로 복귀해,
+  // 낮은 값으로 뚝 떨어졌다가 다시 차오르는 모습을 보이지 않는다.
   const currentTurnProgressPercent = (() => {
     if (!monitoring.isMonitoring || currentTurn == null) return 0
     if (currentTurnDone) return 100
     const effectiveSteps = currentTurnStepCount + (currentTurnHasActiveStep ? 0.5 : 0)
-    return Math.round(5 + 85 * (1 - Math.pow(0.7, effectiveSteps)))
+    const raw = Math.round(5 + 85 * (1 - Math.pow(0.7, effectiveSteps)))
+    const floor =
+      progressFloorRef.current?.turnId === currentTurn.id ? progressFloorRef.current.percent : 0
+    const percent = Math.max(raw, floor)
+    progressFloorRef.current = { turnId: currentTurn.id, percent }
+    return percent
   })()
 
   const turnItems = useMemo(() => buildTurnList(prompts, events), [prompts, events])

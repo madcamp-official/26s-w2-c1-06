@@ -17,6 +17,7 @@ export function initDb(dbPath: string, schemaPath: string): Database.Database {
   addColumnIfMissing(db, 'prompts', 'completed_at', 'DATETIME');
   addColumnIfMissing(db, 'prompts', 'pending_plan_source_text', 'TEXT');
   addColumnIfMissing(db, 'sessions', 'completed_at', 'DATETIME');
+  addColumnIfMissing(db, 'sessions', 'hooks_alive', 'INTEGER NOT NULL DEFAULT 0');
   return db;
 }
 

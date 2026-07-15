@@ -22,6 +22,40 @@ export const MAX_EVENTS_PER_STEP = 6
 // 하나 정도의 체감 주기를 노린 값.
 export const STEP_MAX_DURATION_MS = 30_000
 
+// isQuietSince의 pending 가드 상한 — tool_use만 관찰되고 tool_result 라인을 영영 못 본
+// 고아 pending 행(세션 파일 중간부터 tail한 경우 등)이 "아직 실행 중"으로 무한히
+// 남아 quiet 판정을 영원히 막지 않도록, 이 시간을 넘긴 pending은 무시한다.
+// Bash 타임아웃 상한(10분)보다 넉넉하게 잡은 값.
+const PENDING_EVENT_MAX_AGE_MS = 15 * 60_000
+
+// "마지막 활동 이후 gapMs가 지났다(= 이제 조용하다, 끝났을 수 있다)" 공통 판정 —
+// step-worker의 요약 대상/라이브 상태, main의 db:getSteps 진행 중 표시가 같은 기준을
+// 쓴다. 마지막 tool_event 시각만 보면 두 가지를 오판한다:
+// - tool_events.created_at은 도구를 "호출한" 시각이라, 마지막 이벤트가 아직
+//   pending(빌드/테스트처럼 오래 걸리는 도구가 실행 중)이면 시간이 지나도 조용한 게 아니다.
+// - 에이전트가 도구 없이 텍스트/서술만 이어가는 구간도 활동이다 — assistant_notes
+//   타임스탬프를 함께 본다.
+export function isQuietSince(
+  lastStep: Pick<Step, 'events'> | undefined,
+  notes: Pick<AssistantNote, 'created_at'>[],
+  gapMs: number
+): boolean {
+  const lastEvent = lastStep?.events[lastStep.events.length - 1]
+  const lastEventAt = lastEvent?.created_at ? Date.parse(lastEvent.created_at) : 0
+  if (
+    lastEvent?.status === 'pending' &&
+    lastEventAt > 0 &&
+    Date.now() - lastEventAt < PENDING_EVENT_MAX_AGE_MS
+  ) {
+    return false
+  }
+  const lastNote = notes[notes.length - 1]
+  const lastNoteAt = lastNote?.created_at ? Date.parse(lastNote.created_at) : 0
+  const lastActivityAt = Math.max(lastEventAt, lastNoteAt)
+  if (lastActivityAt === 0) return false
+  return Date.now() - lastActivityAt > gapMs
+}
+
 export interface Step {
   id: string // 그 스텝의 첫 이벤트 id. 결정론적이고 재조회해도 항상 동일.
   promptId: string | null

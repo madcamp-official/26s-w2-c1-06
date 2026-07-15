@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3'
 import type { AIProvider, StepInput } from '@ai/types'
 import { errorDetailOf, pickCodeCandidate, summarizeRawPayload } from '@ai/prompt-templates/stepCodeExtract'
 import type { AssistantNote, SkillLevel, ToolEvent } from '@shared/types'
-import { groupIntoSteps, STEP_IDLE_GAP_MS, TURN_IDLE_GAP_MS, type Step } from '@shared/steps'
+import { groupIntoSteps, isQuietSince, STEP_IDLE_GAP_MS, TURN_IDLE_GAP_MS, type Step } from '@shared/steps'
 import type { LiveStatus } from '@shared/stepProgress'
 
 // 활동 탭 "바뀐 구조와 변경사항"에 실시간으로 쌓이는 진행 로그 — 턴이 끝나길 기다리는
@@ -62,21 +62,6 @@ function truncateForLiveStatus(text: string): string {
   return text.length > LIVE_STATUS_ARG_MAX_LENGTH ? text.slice(0, LIVE_STATUS_ARG_MAX_LENGTH) + '…' : text
 }
 
-// db:getSteps(main/index.ts)의 "진행 중" 판정은 completed_at/세션 종료 외에도 마지막
-// 이벤트 유휴시간(STEP_IDLE_GAP_MS)을 이미 폴백으로 본다 — 그런데 이 워커의 "요약
-// 대상에서 제외할 진행 중 스텝" 판정(tick의 inProgress)과 "지금 하는 중" 판정
-// (computeLiveStatus의 inProgress)은 이 폴백이 빠져 있었다. 그 결과 promptId가
-// null인 orphan 스텝(수동 수정)이나, Stop 훅/idle 완료 처리가 이 세션엔 아직 안
-// 온(세션이 계속 관찰 중이라 ended_at도 없는) 스텝은, 화면엔 이미 "진행 중" 표시가
-// 사라졌는데도(index.ts는 idle 폴백이 있어서) 워커는 계속 "아직 안 끝났다"고 보고
-// 영원히 요약을 안 만들어 "요약 생성 중…"이 안 풀리는 문제가 있었다. 두 판정 기준을
-// 동일하게 맞춘다.
-function isLastStepStale(step: Step | undefined, gapMs: number): boolean {
-  const lastEvent = step?.events[step.events.length - 1]
-  if (!lastEvent?.created_at) return false
-  return Date.now() - Date.parse(lastEvent.created_at) > gapMs
-}
-
 export interface StepWorkerOptions {
   /** 스텝 요약이 새로 저장될 때마다 Main이 렌더러로 push(kind: 'explanation') */
   onExplanationSaved?: () => void
@@ -96,7 +81,7 @@ export function startStepWorker(
   // 안 그러면 동점 처리 순서가 쿼리 플래너에 좌우돼 실제로 관찰 중인 세션이 아니라
   // 이미 오래전에 끝난 세션이 "최신"으로 잘못 뽑힐 수 있다.
   const getLatestSession = db.prepare(`
-    SELECT id, ended_at FROM sessions ORDER BY started_at DESC, rowid DESC LIMIT 1
+    SELECT id, ended_at, hooks_alive FROM sessions ORDER BY started_at DESC, rowid DESC LIMIT 1
   `)
 
   const getSkillLevel = db.prepare(`
@@ -197,14 +182,17 @@ export function startStepWorker(
       // 세션이 끝나지 않았으면 마지막 스텝은 "아직 진행 중"일 수 있어 요약 대상에서
       // 제외한다(유휴시간이 지나기 전엔 실제로 끝난 스텝인지 알 수 없다) — 단, Stop 훅이
       // 이미 그 턴을 완료 처리했으면(completedPromptIds) 유휴시간을 기다릴 필요 없이 바로
-      // "끝난 스텝"으로 본다.
+      // "끝난 스텝"으로 본다. 유휴 판정(isQuietSince)은 pending 도구/노트 활동까지 보는
+      // 공통 기준(shared/steps.ts) — db:getSteps(main/index.ts)의 "진행 중" 표시와 반드시
+      // 같은 기준이어야 화면엔 진행 중 표시가 사라졌는데 요약은 영원히 안 생기는(또는 그
+      // 반대) 어긋남이 없다.
       const lastStep = steps[steps.length - 1]
       const lastStepTurnCompleted = lastStep?.promptId != null && completedPromptIds.has(lastStep.promptId)
       const inProgress =
         session.ended_at != null ||
         steps.length === 0 ||
         lastStepTurnCompleted ||
-        isLastStepStale(lastStep, STEP_IDLE_GAP_MS)
+        isQuietSince(lastStep, notes, STEP_IDLE_GAP_MS)
           ? null
           : lastStep
 
@@ -312,8 +300,14 @@ export function startStepWorker(
   // 사용해 훨씬 빠른 주기로 갱신한다. 완료된 스텝(위 tick)과 달리 아직 유휴/개수 cap으로
   // 닫히지 않은 진행 중 스텝만 본다 — 세션 종료나 진행 중 스텝이 없으면 idle.
   const computeLiveStatus = (): LiveStatus => {
-    const session = getLatestSession.get() as { id: string; ended_at: string | null } | undefined
-    if (!session) return { text: '', idle: true }
+    const session = getLatestSession.get() as
+      | { id: string; ended_at: string | null; hooks_alive: number }
+      | undefined
+    if (!session) return { text: '', idle: true, hooksAlive: false }
+    // 훅이 붙은 세션인지 렌더러에 알려준다 — App은 훅 세션에선 idle을 완료 판정
+    // 폴백으로 쓰지 않는다(Stop 훅의 completed_at이 즉시 오므로 추측이 필요 없고,
+    // 긴 thinking 구간을 완료로 오판해 진행바가 100%로 튀는 원인만 된다).
+    const hooksAlive = session.hooks_alive === 1
 
     const events = getEventsBySession.all({ session_id: session.id }) as ToolEvent[]
     const notes = getNotesBySession.all({ session_id: session.id }) as AssistantNote[]
@@ -327,10 +321,10 @@ export function startStepWorker(
       session.ended_at != null ||
       steps.length === 0 ||
       lastStepTurnCompleted ||
-      isLastStepStale(lastStep, TURN_IDLE_GAP_MS)
+      isQuietSince(lastStep, notes, TURN_IDLE_GAP_MS)
         ? null
         : lastStep
-    if (!inProgress) return { text: '', idle: true }
+    if (!inProgress) return { text: '', idle: true, hooksAlive }
 
     const lastEvent = inProgress.events[inProgress.events.length - 1]
     if (lastEvent) {
@@ -340,12 +334,12 @@ export function startStepWorker(
           const argSummary = summarizeRawPayload(lastEvent.tool_name, lastEvent.raw_payload)
           return argSummary ? truncateForLiveStatus(argSummary) : '파일 미지정'
         })()
-      return { text: `${lastEvent.tool_name} · ${target}`, idle: false }
+      return { text: `${lastEvent.tool_name} · ${target}`, idle: false, hooksAlive }
     }
     if (inProgress.note) {
-      return { text: `${fallbackSummaryFromNote(inProgress.note.text)} 준비 중`, idle: false }
+      return { text: `${fallbackSummaryFromNote(inProgress.note.text)} 준비 중`, idle: false, hooksAlive }
     }
-    return { text: '', idle: true }
+    return { text: '', idle: true, hooksAlive }
   }
 
   let lastLiveKey: string | null = null
@@ -354,7 +348,7 @@ export function startStepWorker(
     if (!options.onLiveUpdate) return
     try {
       const status = computeLiveStatus()
-      const key = `${status.idle}:${status.text}`
+      const key = `${status.idle}:${status.hooksAlive}:${status.text}`
       if (key === lastLiveKey) return
       lastLiveKey = key
       options.onLiveUpdate(status)

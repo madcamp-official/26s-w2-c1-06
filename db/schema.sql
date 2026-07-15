@@ -22,8 +22,12 @@ CREATE TABLE IF NOT EXISTS sessions (
   project_path TEXT,
   started_at DATETIME,
   ended_at DATETIME,         -- SessionEnd 훅/앱 종료/고아 세션 정리 등 "관찰이 끝났다"는 신호.
-  completed_at DATETIME      -- 사용자가 UI의 "완료" 버튼을 명시적으로 누른 시각(그 외 경로는 NULL).
+  completed_at DATETIME,     -- 사용자가 UI의 "완료" 버튼을 명시적으로 누른 시각(그 외 경로는 NULL).
                              -- 강의노트 자동 합성은 ended_at이 아니라 이 값이 있어야만 트리거된다.
+  hooks_alive INTEGER NOT NULL DEFAULT 0  -- 이 세션에서 훅 마커(SessionStart/Stop/SessionEnd)를 하나라도
+                             -- 관찰했으면 1. 훅이 살아있는 세션은 턴 완료가 Stop 훅으로 즉시 오므로,
+                             -- "유휴시간 = 완료" 추측 폴백(completeIdlePrompts, liveStatus.idle)을
+                             -- 훨씬 보수적으로 적용해 진행바가 100%로 튀었다 되돌아오는 오판을 막는다.
 );
 
 CREATE TABLE IF NOT EXISTS prompts (
