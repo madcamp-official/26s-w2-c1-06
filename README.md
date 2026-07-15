@@ -165,11 +165,11 @@
 
 **설치 파일 다운로드 (별도 개발환경 없이 바로 실행):**
 
-- macOS (Apple Silicon): [Factcoding-0.1.0-arm64.dmg](https://github.com/madcamp-official/26s-w2-c1-06/releases/download/v0.1.0-build.2/Factcoding-0.1.0-arm64.dmg)
-- Windows: [Factcoding.Setup.0.1.0.exe](https://github.com/madcamp-official/26s-w2-c1-06/releases/download/v0.1.0-build.2/Factcoding.Setup.0.1.0.exe)
+- macOS (Apple Silicon): [Factcoding-0.1.0-arm64.dmg](https://github.com/madcamp-official/26s-w2-c1-06/releases/download/v0.1.0-build.3/Factcoding-0.1.0-arm64.dmg)
+- Windows: [Factcoding.Setup.0.1.0.exe](https://github.com/madcamp-official/26s-w2-c1-06/releases/download/v0.1.0-build.3/Factcoding.Setup.0.1.0.exe)
 - 그 외 빌드/최신 버전은 [Releases 페이지](https://github.com/madcamp-official/26s-w2-c1-06/releases)에서 확인
 
-> 서명되지 않은 빌드라 처음 실행 시 보안 경고가 뜰 수 있습니다 — macOS는 앱을 우클릭 후 "열기", Windows는 "추가 정보" → "실행"을 선택하면 됩니다. 이 공개 빌드는 진짜 API 키를 담고 있지 않아 AI 기능이 기본적으로 비활성 상태입니다(아래처럼 소스에서 직접 빌드하면 자신의 키로 AI 기능까지 쓸 수 있습니다).
+> 설치 후 바로 AI 기능(구조도 해설·강의노트·Q&A)이 동작합니다 — 별도 API 키 설정이 필요 없습니다(우리 서버 프록시를 거쳐 OpenAI/Gemini에 연결됩니다). 서명되지 않은 빌드라 처음 실행 시 보안 경고가 뜰 수 있습니다 — macOS는 앱을 우클릭 후 "열기", Windows는 "추가 정보" → "실행"을 선택하면 됩니다.
 
 **소스에서 실행 (개발용, AI 기능 포함):**
 
