@@ -155,11 +155,11 @@
 - **실행 방법:** 아래 "실행 방법" 스크립트 참고 — 실행 후 앱에서 프로젝트를 등록하고 "시작하기"를 누르면 그 시점부터 해당 프로젝트 경로에서 실행되는 Claude Code 세션을 관찰한다
 - **시연 영상 / 이미지:**
 
-  ![프로젝트 개요 — 구조도·진행 현황](docs/images/overview.png)
-
-  ![난이도 설정 — 수강 과목 기반 설명 수준 맞춤](docs/images/difficulty-setup.png)
-
-  ![세션 활동 요약 — 구조 변경과 정리된 변경사항](docs/images/session-summary.png)
+  <p>
+    <img src="docs/images/overview.png" alt="프로젝트 개요 — 구조도·진행 현황" width="32%" />
+    <img src="docs/images/difficulty-setup.png" alt="난이도 설정 — 수강 과목 기반 설명 수준 맞춤" width="32%" />
+    <img src="docs/images/session-summary.png" alt="세션 활동 요약 — 구조 변경과 정리된 변경사항" width="32%" />
+  </p>
 
 ### 실행 방법
 
