@@ -41,7 +41,10 @@ jobs:
         shell: bash
         run: cp .env.production.example .env.production
 
-      - run: npm run ${{ matrix.script }}
+      # electron-builder는 CI 환경을 자동 감지해 빌드 후 알아서 GitHub에 퍼블리시하려
+      # 시도한다(GH_TOKEN 없으면 그 자리에서 실패) — 이 job은 산출물만 만들고, 맥/윈도우
+      # 두 산출물을 하나의 릴리스로 합치는 건 아래 release job이 명시적으로 한다.
+      - run: npm run ${{ matrix.script }} -- --publish=never
 
       - uses: actions/upload-artifact@v4
         with:
