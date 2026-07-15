@@ -446,10 +446,14 @@ const getAllCodeUnitEdges = db.prepare(`
   WHERE u.project_id = @project_id
 `)
 
+// 노트 패널은 특정 프로젝트가 아니라 모든 프로젝트에서 만들어진 강의노트를 하나의
+// 누적 목록으로 보여준다 — project_id로 스코프하지 않고, 어느 프로젝트에서 나왔는지
+// 표시할 수 있도록 project 이름만 조인해 함께 반환한다.
 const getAllLectureNotes = db.prepare(`
-  SELECT ln.* FROM lecture_notes ln
+  SELECT ln.*, p.id AS project_id, p.name AS project_name
+  FROM lecture_notes ln
   JOIN sessions s ON s.id = ln.session_id
-  WHERE s.project_id = @project_id
+  JOIN projects p ON p.id = s.project_id
   ORDER BY ln.created_at DESC
 `)
 
@@ -697,8 +701,8 @@ function registerIpcHandlers(): void {
     return getAllCodeUnitEdges.all({ project_id: projectId }) as CodeUnitEdge[]
   })
 
-  ipcMain.handle('db:getLectureNotes', (_event, projectId: string): LectureNote[] => {
-    return getAllLectureNotes.all({ project_id: projectId }) as LectureNote[]
+  ipcMain.handle('db:getLectureNotes', (): LectureNote[] => {
+    return getAllLectureNotes.all() as LectureNote[]
   })
 
   ipcMain.handle('db:isOnboardingComplete', (): boolean => {

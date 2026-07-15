@@ -139,10 +139,9 @@ export function TurnDetailPanel({
               <ol className="space-y-2.5">
                 {turnSteps.map((step) => {
                   const nested = versionsByStepId.get(step.stepId) ?? []
-                  // 완료된 턴은 스텝을 훑어보는 과정 자체가 중요하지 않으니, 어떤 코드가
-                  // 나왔는지 바로 보이도록 기본으로 펼쳐둔다(진행 중엔 스텝 목록이 계속
-                  // 늘어나므로 기본은 접어서 죽 훑어보는 용도를 유지).
-                  const isOpen = nestedOpen[step.stepId] ?? completed
+                  // 코드 유닛 목록은 완료 여부와 무관하게 항상 접힌 채로 시작한다 —
+                  // 스텝 카드를 죽 훑어본 뒤 필요한 것만 펼쳐보는 용도.
+                  const isOpen = nestedOpen[step.stepId] ?? false
                   return (
                     <li key={step.stepId}>
                       <StepCard step={step} />

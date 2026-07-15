@@ -110,4 +110,15 @@ export class MockAIProvider implements AIProvider {
 
     return `${TONE_PREFIX[skillLevel]} "${question}"에 대한 답변: 현재 세션은 ${context.units.length}개 코드 유닛과 ${context.edges.length}개 관계, ${context.prompts.length}개 요청 턴으로 구성되어 있어요. (mock 응답 — 실제 키 연결 시 Gemini가 답변합니다)`.trim()
   }
+
+  async extractPlan(_userRequest: string, intentText: string): Promise<string> {
+    await new Promise((resolve) => setTimeout(resolve, 300))
+
+    const sentences = intentText
+      .split(/(?<=[.!?다요])\s+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+    return sentences.map((s) => `- ${s}`).join('\n')
+  }
 }

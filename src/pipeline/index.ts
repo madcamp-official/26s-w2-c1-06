@@ -378,7 +378,7 @@ export function startPipeline(config: PipelineConfig): PipelineHandle {
         const promptId = currentPromptIdBySession.get(sessionId) ?? null;
 
         const planCandidate = planTracker.considerAssistantText(sessionId, event.text);
-        if (planCandidate !== null && promptId) repo.updatePromptPlanText(promptId, planCandidate);
+        if (planCandidate !== null && promptId) repo.stagePendingPlanSourceText(promptId, planCandidate);
 
         // 턴의 첫 텍스트만 남기는 plan_text 폴백과 달리, 실시간 진행 로그는 텍스트
         // 조각 전부를 참고 텍스트로 쓸 수 있어야 해서 전부 보존한다. 같은 timestamp에

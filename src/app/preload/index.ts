@@ -55,8 +55,9 @@ const factcodingApi = {
     ipcRenderer.invoke('db:getUnitVersionExplanationsByPrompt', promptId, sessionId, skillLevel),
   getCodeUnitEdges: (projectId: string): Promise<CodeUnitEdge[]> =>
     ipcRenderer.invoke('db:getCodeUnitEdges', projectId),
-  getLectureNotes: (projectId: string): Promise<LectureNote[]> =>
-    ipcRenderer.invoke('db:getLectureNotes', projectId),
+  // 특정 프로젝트로 스코프하지 않는다 — 노트 패널은 모든 프로젝트의 강의노트를
+  // 하나의 누적 목록으로 보여준다(db:getLectureNotes 참조).
+  getLectureNotes: (): Promise<LectureNote[]> => ipcRenderer.invoke('db:getLectureNotes'),
   isOnboardingComplete: (): Promise<boolean> => ipcRenderer.invoke('db:isOnboardingComplete'),
   completeOnboarding: (): Promise<void> => ipcRenderer.invoke('db:completeOnboarding'),
   getOnboardingProfile: (): Promise<OnboardingProfile | null> =>

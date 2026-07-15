@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { AiExplanation, CodeUnitVersionWithUnit, SkillLevel } from '@shared/types'
-import { formatTime, parseConceptTags } from '@shared/format'
+import { formatTime } from '@shared/format'
 
 interface UnitTimelineProps {
   versions: CodeUnitVersionWithUnit[]
@@ -101,19 +101,7 @@ export function UnitTimeline({ versions, explanations }: UnitTimelineProps) {
               {pending || !explanation ? (
                 <span className="font-mono text-[11px] text-[#3c7566]">요약 생성 중…</span>
               ) : (
-                <>
-                  <span>{explanation.content}</span>
-                  <span className="mt-2 flex flex-wrap gap-1.5">
-                    {parseConceptTags(explanation.concept_tags).map((tag) => (
-                      <span
-                        key={tag}
-                        className="rounded-md border border-[#cfe3d8] bg-[#eef6f1] px-2 py-0.5 font-mono text-[10px] text-[#3c7566]"
-                      >
-                        {tag}
-                      </span>
-                    ))}
-                  </span>
-                </>
+                <span>{explanation.content}</span>
               )}
             </div>
 

@@ -15,6 +15,7 @@ export function initDb(dbPath: string, schemaPath: string): Database.Database {
   // 파이프라인만 단독 실행하는 경로는 여기가 유일한 초기화 지점이라 같은 마이그레이션을
   // 최소한으로 반복한다(파이프라인이 실제로 쓰는 컬럼만).
   addColumnIfMissing(db, 'prompts', 'completed_at', 'DATETIME');
+  addColumnIfMissing(db, 'prompts', 'pending_plan_source_text', 'TEXT');
   addColumnIfMissing(db, 'sessions', 'completed_at', 'DATETIME');
   return db;
 }

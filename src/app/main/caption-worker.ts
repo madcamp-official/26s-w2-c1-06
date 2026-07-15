@@ -87,6 +87,23 @@ export function startCaptionWorker(
     SELECT * FROM tool_events WHERE prompt_id = @prompt_id ORDER BY created_at ASC
   `)
 
+  // "이번 프롬프트의 계획" 카드용: TodoWrite 없이 남은 턴의 첫 assistant 텍스트(의도
+  // 선언문, pipeline/index.ts의 PlanTracker 참조)를 실제 단계별 계획으로 재구성해야
+  // 하는 턴을 찾는다. 가장 최근 턴부터(=지금 화면에 보이는 턴) 처리한다.
+  const getNextPendingPlan = db.prepare(`
+    SELECT * FROM prompts
+    WHERE pending_plan_source_text IS NOT NULL AND plan_text IS NULL
+    ORDER BY created_at DESC
+    LIMIT 1
+  `)
+
+  // TodoWrite가 그 사이 도착해 plan_text를 이미 채웠으면(plan_text IS NULL 가드)
+  // AI 변환 결과로 덮어쓰지 않는다 — TodoWrite가 항상 우선.
+  const savePlanText = db.prepare(`
+    UPDATE prompts SET plan_text = @planText, pending_plan_source_text = NULL
+    WHERE id = @id AND plan_text IS NULL
+  `)
+
   // prompts.completed_at 자체를 채우는 idle 폴백은 pipeline/index.ts의
   // repo.completeIdlePrompts()가 담당한다(20초, 아직 실행 중인 tool_event가 있으면
   // 건너뛰는 가드 + 오판 시 되돌리는 로직 포함) — 여기서는 그 결과(completed_at)를
@@ -150,11 +167,33 @@ export function startCaptionWorker(
 
   let running = false
   const retryAfterByTurn = new Map<string, number>()
+  const retryAfterByPlan = new Map<string, number>()
 
   const tick = async (): Promise<void> => {
     if (running) return // 이전 틱의 provider 호출이 아직 안 끝났으면 겹쳐 실행하지 않음
     running = true
     try {
+      let pendingPlan = getNextPendingPlan.get() as Prompt | undefined
+      if (pendingPlan && (retryAfterByPlan.get(pendingPlan.id) ?? 0) > Date.now()) {
+        pendingPlan = undefined // 쿨다운 중
+      }
+
+      if (pendingPlan) {
+        try {
+          const plan = await aiProvider.extractPlan(
+            pendingPlan.user_text ?? '',
+            pendingPlan.pending_plan_source_text ?? ''
+          )
+          if (plan.trim()) {
+            savePlanText.run({ id: pendingPlan.id, planText: plan.trim() })
+            onExplanationSaved?.()
+          }
+        } catch (error) {
+          retryAfterByPlan.set(pendingPlan.id, Date.now() + FAILURE_COOLDOWN_MS)
+          throw error
+        }
+      }
+
       const skillLevel = ((getSkillLevel.get() as { value: string } | undefined)?.value ??
         'intermediate') as SkillLevel
 

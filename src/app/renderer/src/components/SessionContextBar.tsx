@@ -1,4 +1,5 @@
 import { ChevronDown, ListTodo } from 'lucide-react'
+import Markdown from 'react-markdown'
 import type { Prompt } from '@shared/types'
 
 interface SessionContextBarProps {
@@ -12,7 +13,10 @@ export function SessionContextBar({ prompts }: SessionContextBarProps) {
   if (prompts.length === 0) return null
 
   const currentTurn = prompts[prompts.length - 1]
-  if (!currentTurn.plan_text) return null
+  // TodoWrite가 없으면 plan_text는 AI가 pending_plan_source_text(의도 선언문)를
+  // 단계별 계획으로 정리할 때까지 비어있다(caption-worker.ts의 plan-worker 블록 참조) —
+  // 둘 다 없으면 이 턴은 아직 계획으로 삼을 만한 게 아무것도 안 왔다는 뜻이라 숨긴다.
+  if (!currentTurn.plan_text && !currentTurn.pending_plan_source_text) return null
 
   return (
     <details className="group mb-4 overflow-hidden rounded-xl border border-border bg-card">
@@ -22,9 +26,13 @@ export function SessionContextBar({ prompts }: SessionContextBarProps) {
         <span className="font-mono text-[10px] text-[#6d7069]">PLAN · PROMPT {currentTurn.turn_index + 1}</span>
         <ChevronDown size={14} className="ml-auto text-[#6d7069] transition group-open:rotate-180" />
       </summary>
-      <pre className="overflow-x-auto whitespace-pre-wrap border-t border-border bg-[#f6f5f1] px-4 py-3 font-mono text-[11px] leading-6 text-[#3f514c]">
-        {currentTurn.plan_text}
-      </pre>
+      <div className="markdown-body border-t border-border bg-[#f6f5f1] px-4 py-3">
+        {currentTurn.plan_text ? (
+          <Markdown>{currentTurn.plan_text}</Markdown>
+        ) : (
+          <span className="font-mono text-[12px] text-[#3c7566]">계획 정리 중…</span>
+        )}
+      </div>
     </details>
   )
 }

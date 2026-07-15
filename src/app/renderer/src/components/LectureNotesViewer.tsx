@@ -18,9 +18,12 @@ const SKILL_LABEL = SKILL_LEVEL_LABEL
 
 interface SessionGroup {
   sessionId: string
+  projectName?: string
   notes: LectureNote[]
 }
 
+// 노트 패널은 모든 프로젝트의 강의노트를 하나의 목록으로 받으므로(useLectureNotes),
+// 세션별로 묶은 뒤 각 그룹이 어느 프로젝트에서 나왔는지 헤더에 표시한다.
 function groupBySession(notes: LectureNote[]): SessionGroup[] {
   const order: string[] = []
   const bySession = new Map<string, LectureNote[]>()
@@ -33,7 +36,10 @@ function groupBySession(notes: LectureNote[]): SessionGroup[] {
     bySession.get(note.session_id)!.push(note)
   }
 
-  return order.map((sessionId) => ({ sessionId, notes: bySession.get(sessionId)! }))
+  return order.map((sessionId) => {
+    const sessionNotes = bySession.get(sessionId)!
+    return { sessionId, projectName: sessionNotes[0]?.project_name, notes: sessionNotes }
+  })
 }
 
 function NoteGroupSection({
@@ -56,9 +62,14 @@ function NoteGroupSection({
             오늘 세션 요약
           </span>
         ) : (
-          <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#6d7069]">
-            SESSION / {group.sessionId.slice(0, 8)}
-          </span>
+          <>
+            {group.projectName && (
+              <span className="text-[12px] font-semibold text-[#373832]">{group.projectName}</span>
+            )}
+            <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-[#6d7069]">
+              SESSION / {group.sessionId.slice(0, 8)}
+            </span>
+          </>
         )}
       </div>
 

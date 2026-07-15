@@ -31,8 +31,11 @@ CREATE TABLE IF NOT EXISTS prompts (
   session_id TEXT REFERENCES sessions(id),
   turn_index INTEGER,
   user_text TEXT,
-  plan_text TEXT,           -- 에이전트의 계획. JSONL의 TodoWrite tool_use에서 추출,
-                            -- 없으면 해당 턴 첫 assistant 텍스트로 대체 (SPEC 4.1)
+  plan_text TEXT,           -- 화면에 보여줄 실제 계획. JSONL의 TodoWrite tool_use에서 추출한
+                            -- 목록이거나, TodoWrite가 없을 때는 plan-worker가
+                            -- pending_plan_source_text를 AI로 재구성한 결과 (SPEC 4.1)
+  pending_plan_source_text TEXT, -- TodoWrite 없이 남은 해당 턴 첫 assistant 텍스트(의도 선언문).
+                            -- plan-worker가 이걸 plan_text로 정리할 때까지의 임시 대기열.
   created_at DATETIME,
   completed_at DATETIME     -- Stop 훅(매 턴 종료마다 발생)이 잡은 "에이전트 작업이 끝난 시각".
                             -- UI의 진행중 스피너/진행바, caption-worker의 턴 완료 판정이 사용.
