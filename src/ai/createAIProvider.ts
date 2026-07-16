@@ -19,28 +19,38 @@ import { MockAIProvider } from './mock-provider/MockAIProvider'
 // 서버리스 함수로 옮겼다. openai SDK가 항상 `{baseURL}/chat/completions`로 요청을
 // 보내므로, PACKAGED_PROXY_URL은 반드시 `/api`로 끝나야 한다(엔드포인트 파일 경로가
 // `vercel-proxy/api/chat/completions.ts` → `/api/chat/completions`).
-const PACKAGED_PROXY_URL = process.env.PACKAGED_PROXY_URL
-const PACKAGED_PROXY_TOKEN = process.env.PACKAGED_PROXY_TOKEN
-
-// Gemini도 OpenAI와 똑같은 이유로 패키징된 빌드에 진짜 키를 안 담는다 — 무료 티어라
-// 새도 금전 피해는 없지만, 새면 구글이 어뷰징으로 보고 그 프로젝트/키를 정지시킬 수
-// 있어 "완전 무해"는 아니다. @google/genai SDK는 OpenAI SDK와 인증 방식이 달라서
-// (Authorization 헤더가 아니라 x-goog-api-key 헤더, 그리고 baseURL 뒤에 붙는 경로가
-// SDK 내부적으로 결정됨) OpenAI 때처럼 baseURL만 바꿔치기하면 끝나는 게 아니라, 프록시
-// 쪽(vercel-proxy/api/gemini/[...path].ts)이 경로를 통째로 그대로 포워드하는 범용
-// 프록시로 따로 구현돼 있다. GeminiKeyPool의 2키 라운드로빈/쿼터 폴백 로직은 그대로
-// 살리기 위해 진짜 키 2개 대신 프록시 전용 토큰 2개를 등록해서 쓴다(각 토큰이 서버
-// 쪽에서 대응하는 진짜 키로 치환됨).
-const PACKAGED_GEMINI_PROXY_URL = process.env.PACKAGED_GEMINI_PROXY_URL
-const PACKAGED_GEMINI_PROXY_TOKENS = [
-  process.env.PACKAGED_GEMINI_PROXY_TOKEN_A,
-  process.env.PACKAGED_GEMINI_PROXY_TOKEN_B
-].filter((token): token is string => Boolean(token))
+// 주의: 이 프록시 값들은 반드시 createAIProvider() **함수 안에서** process.env로 읽어야
+// 한다. 모듈 최상단 const로 캡처하면 안 된다 — 이 모듈은 index.ts가 import하는 순간
+// (그 파일의 dotenv `loadEnv()`가 실행되기 *전에*, ES import는 호이스팅되므로) 평가되어,
+// 그 시점엔 .env.production이 아직 로드되지 않아 값이 전부 undefined로 굳는다. 그러면
+// 패키징된 앱이 프록시 설정을 못 찾고 MockAIProvider로 폴백해 "AI 연동이 안 되는" 것처럼
+// 보인다(dev 경로가 멀쩡했던 건 아래에서 OPENAI_API_KEY를 호출 시점에 읽기 때문). 함수
+// 안에서 읽으면 loadEnv() 이후(app 준비 시점 createAIProvider 호출)라 값이 채워져 있다.
 
 // 패키징된 빌드는 dev와 같은 순서(OpenAI → Gemini → Mock)의 폴백 체인을 쓰되, 둘 다
 // 항상 프록시를 거친다(진짜 키를 하나도 안 가짐). dev 빌드는 기존 그대로 OPENAI_API_KEY/
 // GEMINI_KEY_A/B를 직접 쓴다.
 export function createAIProvider(): AIProvider {
+  // 패키징된(배포된) 앱은 진짜 OpenAI 키를 절대 갖고 있지 않는다 — asar를 풀거나 strings로
+  // 뒤지면 바로 나오는 값이라, 새어나가면 실과금으로 이어진다. 대신 이 프록시 토큰/URL로
+  // Vercel 서버리스 함수(vercel-proxy/api/chat/completions.ts가 실제 프록시 구현)를 거쳐서만
+  // OpenAI를 호출한다. 값은 .env.production(gitignore, 배포 빌드에만 번들)에서 온다 —
+  // .env.production.example 참조. openai SDK가 항상 `{baseURL}/chat/completions`로 요청을
+  // 보내므로 PACKAGED_PROXY_URL은 반드시 `/api`로 끝나야 한다.
+  const PACKAGED_PROXY_URL = process.env.PACKAGED_PROXY_URL
+  const PACKAGED_PROXY_TOKEN = process.env.PACKAGED_PROXY_TOKEN
+
+  // Gemini도 OpenAI와 똑같은 이유로 패키징된 빌드에 진짜 키를 안 담는다. @google/genai SDK는
+  // 인증 방식이 달라(x-goog-api-key 헤더, 경로도 SDK 내부 결정) 프록시 쪽
+  // (vercel-proxy/api/gemini/[...path].ts)이 경로를 통째로 포워드하는 범용 프록시로 따로
+  // 구현돼 있다. GeminiKeyPool의 2키 라운드로빈/쿼터 폴백을 살리기 위해 진짜 키 2개 대신
+  // 프록시 전용 토큰 2개를 등록해 쓴다(서버 쪽에서 대응하는 진짜 키로 치환).
+  const PACKAGED_GEMINI_PROXY_URL = process.env.PACKAGED_GEMINI_PROXY_URL
+  const PACKAGED_GEMINI_PROXY_TOKENS = [
+    process.env.PACKAGED_GEMINI_PROXY_TOKEN_A,
+    process.env.PACKAGED_GEMINI_PROXY_TOKEN_B
+  ].filter((token): token is string => Boolean(token))
+
   if (app.isPackaged) {
     if (PACKAGED_PROXY_URL && PACKAGED_PROXY_TOKEN) {
       return new OpenAIProvider(PACKAGED_PROXY_TOKEN, PACKAGED_PROXY_URL)
